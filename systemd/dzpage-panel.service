@@ -1,0 +1,56 @@
+[Unit]
+Description=DZPage Panel — DayZ game server management
+Documentation=https://dzpage.com/panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dzpage
+Group=dzpage
+# HOME zeigt in das Datenverzeichnis: SteamCMD legt sein Sitzungstoken dort ab,
+# und es gehoert dem Dienstbenutzer — nicht einem Menschen mit Shell.
+Environment=HOME=/var/lib/dzpage-panel
+Environment=NODE_ENV=production
+WorkingDirectory=/usr/lib/dzpage-panel
+ExecStart=/usr/bin/node /usr/lib/dzpage-panel/bin/dzpage-panel.js
+Restart=on-failure
+RestartSec=5
+
+# Ein entgleistes Panel darf die Spielserver nicht mitreissen. Die Grenze gilt
+# fuer den ganzen Dienst samt Kindprozessen — SteamCMD gehoert dazu und braucht
+# beim Entpacken deutlich mehr als das Panel selbst (Ziel im Leerlauf: unter
+# 100 MB).
+MemoryMax=2G
+CPUQuota=200%
+
+# Absicherung: Das Panel startet fremde Prozesse, hat aber selbst fast nichts
+# zu suchen. Was SteamCMD und die Spieldateien brauchen, steht in ReadWritePaths.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/dzpage-panel /etc/dzpage-panel
+
+# Protokoll geht an journald: journalctl -u dzpage-panel -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dzpage-panel
+
+[Install]
+WantedBy=multi-user.target

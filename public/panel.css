@@ -1,0 +1,236 @@
+/* Oberflaeche des Panels: dunkel mit rotem Akzent wie DZPage, eine Datei, kein
+   Bauschritt. Zuerst fuer schmale Fenster gestaltet — das Panel wird oft vom
+   Handy aus geoeffnet, wenn ein Server steht. */
+
+:root {
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --panel-2: #22262d;
+  --line: #2e333c;
+  --text: #e7e9ee;
+  --muted: #9aa1ad;
+  --accent: #e5273a;
+  --ok: #4ec27a;
+  --warn: #e5a127;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a { color: #ff8a95; }
+a:hover { color: #ffb3ba; }
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.brand .mark {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.top nav { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.lang { color: var(--muted); text-decoration: none; }
+.lang.current { color: var(--text); font-weight: 600; }
+.inline { display: inline; margin: 0; }
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.link:hover { color: var(--text); }
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 22px 18px 60px;
+}
+
+h1 { margin: 0 0 6px; font-size: 24px; }
+h2 { margin: 26px 0 8px; font-size: 18px; }
+.lede { margin: 0 0 22px; color: var(--muted); }
+
+.card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.card + .card { margin-top: 16px; }
+
+.stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.stepper li { display: flex; align-items: center; gap: 6px; }
+.stepper .num {
+  display: inline-grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 12px;
+}
+.stepper li.current { color: var(--text); font-weight: 600; }
+.stepper li.current .num { border-color: var(--accent); background: var(--accent); color: #fff; }
+.stepper li.done .num { border-color: var(--ok); color: var(--ok); }
+
+.field { margin: 0 0 16px; }
+.field label { display: block; margin-bottom: 5px; font-size: 14px; font-weight: 600; }
+.field .hint { display: block; margin-top: 5px; color: var(--muted); font-size: 13px; }
+
+input[type="text"], input[type="password"], input[type="number"], select {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.row { display: flex; flex-wrap: wrap; gap: 12px; }
+.row > .field { flex: 1 1 160px; min-width: 0; }
+
+button.primary, .button {
+  display: inline-block;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+button.primary:hover, .button:hover { background: #f4394c; color: #fff; }
+
+button.secondary {
+  padding: 11px 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px; }
+
+.choice {
+  display: block;
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.choice strong { display: block; }
+.choice .hint { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.choice input { margin-right: 8px; }
+
+.drawer {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.drawer > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.drawer[open] > summary { margin-bottom: 12px; }
+
+.notice {
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border-left: 3px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 14px;
+}
+.notice.error { border-left-color: var(--accent); }
+.notice.ok { border-left-color: var(--ok); }
+.notice.warn { border-left-color: var(--warn); }
+
+.status { width: 100%; border-collapse: collapse; font-size: 14px; }
+.status th, .status td { padding: 9px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.status th { width: 42%; color: var(--muted); font-weight: 500; }
+.status tr:last-child th, .status tr:last-child td { border-bottom: 0; }
+
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+.pill.ok { background: rgba(78, 194, 122, 0.16); color: var(--ok); }
+.pill.warn { background: rgba(229, 161, 39, 0.16); color: var(--warn); }
+.pill.off { background: rgba(154, 161, 173, 0.16); color: var(--muted); }
+
+.log {
+  max-height: 340px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0f1114;
+  color: #cfd4dd;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.events { margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.events li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.events li:last-child { border-bottom: 0; }
+.events time { display: block; color: var(--muted); font-size: 12px; }
+
+.bottom {
+  padding: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (min-width: 620px) {
+  main { padding-top: 30px; }
+  h1 { font-size: 28px; }
+}

@@ -1,0 +1,8 @@
+# Das Panel laeuft auf Linux. Shell-Skripte und Unit-Dateien duerfen unter
+# keinen Umstaenden mit CRLF ausgecheckt werden — systemd und /bin/sh
+# scheitern daran mit unverstaendlichen Fehlern.
+* text=auto eol=lf
+*.sh text eol=lf
+*.service text eol=lf
+*.png binary
+*.gz binary
