@@ -1,5 +1,5 @@
 import { saveConfig } from "../config.js";
-import { ACCOUNT_PATTERN, ensureSteamCmd, steamLogin } from "../steam/steamcmd.js";
+import { ACCOUNT_PATTERN, ensureSteamCmd, steamLogin, verifySession } from "../steam/steamcmd.js";
 import { isPtyAvailable } from "../steam/pty.js";
 import { deleteSetting, getSetting, KEYS, setSetting } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
@@ -17,17 +17,33 @@ import { log } from "../log.js";
  */
 
 const JOB_KIND = "steam-login";
+const VERIFY_KIND = "steam-verify";
 
 function frame(rc, inSetup, body) {
   return inSetup ? `${stepper(rc.t, 3)}<div class="card">${body}</div>` : `<div class="card">${body}</div>`;
 }
 
-function loginForm(rc, { account = "", inSetup, message = null, messageKind = "error" }) {
+function loginForm(rc, { account = "", inSetup, connected = false, message = null, messageKind = "error" }) {
   const t = rc.t;
+  // Ist das Konto schon angemeldet, gehoert die Probe nach oben: sie beantwortet
+  // genau die Frage, um die es geht — traegt das gemerkte Sitzungstoken noch?
+  const verifyBlock = connected
+    ? `<form method="post" action="/steam">
+         ${csrfInput(rc.csrf)}
+         <div class="actions">
+           <button class="secondary" type="submit" name="action" value="verify">${escapeHtml(
+             t("setup.steam.verify"),
+           )}</button>
+         </div>
+         <p class="hint">${escapeHtml(t("setup.steam.verifyHint"))}</p>
+       </form>`
+    : "";
+
   return `
     <h1>${escapeHtml(t("setup.steam.heading"))}</h1>
     <p class="lede">${escapeHtml(t("setup.steam.lede"))}</p>
     ${message ? notice(messageKind, message) : ""}
+    ${verifyBlock}
     <form method="post" action="/steam">
       ${csrfInput(rc.csrf)}
       ${field({
@@ -65,7 +81,7 @@ export async function page(rc) {
 
   if (rc.method === "GET") {
     const running = rc.app.jobs.current();
-    if (running?.kind === JOB_KIND && running.running) {
+    if (running && running.running && (running.kind === JOB_KIND || running.kind === VERIFY_KIND)) {
       rc.redirect(`/steam/status?id=${running.id}`);
       return;
     }
@@ -80,6 +96,7 @@ export async function page(rc) {
         loginForm(rc, {
           account,
           inSetup,
+          connected: progress.steamDone && !ptyMissing,
           message: ptyMissing
             ? "script(1) aus util-linux fehlt auf diesem System — ohne Terminal kann SteamCMD nicht nach dem Passwort fragen."
             : progress.steamDone
@@ -89,6 +106,28 @@ export async function page(rc) {
         }),
       ),
     );
+    return;
+  }
+
+  if (rc.form.get("action") === "verify") {
+    const account = (await getSetting(rc.app.db, KEYS.steamAccount)) || "";
+    const config = rc.config;
+    const started = rc.app.jobs.start(VERIFY_KIND, async (job) => {
+      const found = await ensureSteamCmd(config, job);
+      job.append(`Prüfe die gemerkte Anmeldung für ${account}.`);
+      const result = await verifySession({ steamcmdPath: found.path, account });
+      if (!result.ok) throw new Error(result.message);
+      return { account };
+    });
+    if (!started.ok) {
+      rc.page(
+        409,
+        rc.t("setup.step.steam"),
+        frame(rc, inSetup, loginForm(rc, { account, inSetup, connected: true, message: rc.t("setup.steam.busy") })),
+      );
+      return;
+    }
+    rc.redirect(`/steam/status?id=${started.job.id}`);
     return;
   }
 
@@ -157,10 +196,11 @@ export async function status(rc) {
   const id = rc.method === "GET" ? rc.url.searchParams.get("id") : rc.form.get("id");
   const job = (id && rc.app.jobs.get(id)) || rc.app.jobs.current();
 
-  if (!job || job.kind !== JOB_KIND) {
+  if (!job || (job.kind !== JOB_KIND && job.kind !== VERIFY_KIND)) {
     rc.redirect("/steam");
     return;
   }
+  const verifying = job.kind === VERIFY_KIND;
 
   if (rc.method === "POST") {
     const answer = rc.form.get("answer") || "";
@@ -198,12 +238,22 @@ export async function status(rc) {
     head = '<meta http-equiv="refresh" content="2">';
     top = notice("warn", t("setup.steam.running"));
   } else if (job.status === "ok") {
-    top = notice("ok", t("setup.steam.success", { account: job.result?.account || "" }));
+    top = notice(
+      "ok",
+      verifying
+        ? t("setup.steam.verifyOk", { account: job.result?.account || "" })
+        : t("setup.steam.success", { account: job.result?.account || "" }),
+    );
     actions = inSetup
       ? `<div class="actions"><a class="button" href="/dzpage">${escapeHtml(t("common.next"))}</a></div>`
       : `<div class="actions"><a class="button" href="/">${escapeHtml(t("common.dashboard"))}</a></div>`;
   } else {
-    top = notice("error", t("setup.steam.failed", { message: job.error || "" }));
+    top = notice(
+      "error",
+      verifying
+        ? t("setup.steam.verifyFailed", { message: job.error || "" })
+        : t("setup.steam.failed", { message: job.error || "" }),
+    );
     actions = `<div class="actions"><a class="button secondary" href="/steam">${escapeHtml(
       t("setup.steam.again"),
     )}</a></div>`;

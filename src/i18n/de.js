@@ -85,6 +85,11 @@ export const de = {
   "setup.steam.log": "Ausgabe von SteamCMD",
   "setup.steam.logNote": "Passwörter und Codes erscheinen in dieser Ausgabe nie.",
   "setup.steam.again": "Neu beginnen",
+  "setup.steam.verify": "Gemerkte Anmeldung prüfen",
+  "setup.steam.verifyHint":
+    "Startet SteamCMD einmal ohne Passwort. Klappt das, laufen Download und Aktualisierung später ohne Zutun.",
+  "setup.steam.verifyOk": "Das Sitzungstoken trägt — {account} meldet sich ohne Passwort an.",
+  "setup.steam.verifyFailed": "Das Sitzungstoken trägt nicht: {message}",
   "setup.steam.busy": "Es läuft schon ein SteamCMD-Vorgang.",
 
   "setup.dzpage.heading": "Mit dem DZPage-Konto verbinden",

@@ -55,6 +55,10 @@ erstellen (`dzp_panel_…`) — der Assistent fragt im vierten Schritt danach.
 4. **DZPage-Schlüssel** — eintragen, die Verbindung wird sofort geprüft.
 5. **Fertig** — weiter zur Übersicht.
 
+Nach der Steam-Anmeldung steht auf derselben Seite „Gemerkte Anmeldung prüfen".
+Das startet SteamCMD einmal **ohne Passwort** und beantwortet damit die Frage,
+auf die es ankommt: Läuft der Download später ohne Zutun?
+
 Der Assistent ist nur erreichbar, solange die Einrichtung läuft; danach liefern
 seine Routen 404. Ab Schritt 3 braucht er eine angemeldete Sitzung — wer später
 an den Port kommt, kann das Panel nicht übernehmen.
@@ -148,7 +152,7 @@ zwei Minuten und ist kein Fehler.
 ## Entwicklung
 
 ```sh
-npm test                     # 43 Tests, ohne Netz und ohne Datenbankserver
+npm test                     # 44 Tests, ohne Netz und ohne Datenbankserver
 DZPANEL_NET_TESTS=1 npm test # zusätzlich die echte SteamCMD-Installation
 ```
 

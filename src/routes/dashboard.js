@@ -34,7 +34,7 @@ async function dashboard(rc) {
   ]);
 
   const steamCell = settings[KEYS.steamLoggedInAt]
-    ? `${pill("ok", t("common.ready"))} ${escapeHtml(settings[KEYS.steamAccount] || "")}`
+    ? `${pill("ok", t("common.ready"))} <a href="/steam">${escapeHtml(settings[KEYS.steamAccount] || "")}</a>`
     : `${pill("warn", t("dash.steamPending"))} <a href="/steam">${escapeHtml(t("dash.steamConnect"))}</a>`;
 
   const dzpageCell = settings[KEYS.dzpagePanelId]

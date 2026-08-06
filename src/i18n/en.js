@@ -84,6 +84,11 @@ export const en = {
   "setup.steam.log": "SteamCMD output",
   "setup.steam.logNote": "Passwords and codes never appear in this output.",
   "setup.steam.again": "Start over",
+  "setup.steam.verify": "Check the saved sign-in",
+  "setup.steam.verifyHint":
+    "Runs SteamCMD once without a password. If that works, downloads and updates will work unattended.",
+  "setup.steam.verifyOk": "The saved session still works — {account} signs in without a password.",
+  "setup.steam.verifyFailed": "The saved session does not work: {message}",
   "setup.steam.busy": "A SteamCMD run is already in progress.",
 
   "setup.dzpage.heading": "Connect to your DZPage account",

@@ -179,6 +179,15 @@ test("stripAnsi entfernt Farbcodes und lässt den Text stehen", () => {
   assert.equal(stripAnsi("kein [Klammertext] verloren"), "kein [Klammertext] verloren");
 });
 
+test("Gemerkte Anmeldung: trägt und trägt nicht", async () => {
+  const { verifySession } = await import("../src/steam/steamcmd.js");
+  assert.deepEqual(await verifySession({ steamcmdPath: FIXTURE, account: "cached_konto" }), { ok: true });
+
+  const stale = await verifySession({ steamcmdPath: FIXTURE, account: "testkonto" });
+  assert.equal(stale.ok, false);
+  assert.match(stale.message, /Sitzungstoken/);
+});
+
 test("Vorhandenes SteamCMD wird gefunden", () => {
   assert.equal(findSteamCmd({ steam: { steamcmdPath: FIXTURE } }).path, FIXTURE);
   assert.equal(findSteamCmd({ steam: { steamcmdPath: "/gibt/es/nicht" } })?.path !== "/gibt/es/nicht", true);
@@ -222,6 +231,18 @@ test("Steam-Schritt über HTTP: Rückfrage im Browser beantworten", async () => 
 
   await client.get("/dzpage");
   assert.equal(client.lastStatus, 200);
+
+  // Die Probe aus der Oberflaeche: genau das Abnahmekriterium der Phase —
+  // meldet sich das Konto ohne Passwort an?
+  await client.get("/steam");
+  assert.match(client.lastBody, /Check the saved sign-in/);
+  await client.submit("/steam", { action: "verify" });
+  assert.match(client.lastLocation, /^\/steam\/status\?id=/);
+  const verifyPath = client.lastLocation;
+  await waitFor(() => (panel.app.jobs.current().running ? null : true));
+  await client.get(verifyPath);
+  // Das Testkonto heisst nicht "cached*", die Probe muss also scheitern.
+  assert.match(client.lastBody, /saved session does not work/);
 
   // Fehlschlag auf demselben Weg: die Route macht aus dem Ergebnis einen
   // gescheiterten Vorgang, die Statusseite zeigt den Grund.
