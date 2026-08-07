@@ -56,6 +56,33 @@ test("Formular mit fremdem Origin wird abgewiesen", async () => {
   assert.equal(client.lastStatus, 403);
 });
 
+test("Formular von fremder Seite wird abgewiesen (Sec-Fetch-Site)", async () => {
+  await client.get("/setup/database");
+  await client.post(
+    "/setup/database",
+    { kind: "sqlite", action: "save", _csrf: client.csrf },
+    { headers: { "sec-fetch-site": "cross-site" } },
+  );
+  assert.equal(client.lastStatus, 403);
+});
+
+/**
+ * Der Fall, an dem der Assistent im echten Browser gescheitert ist: Chrome
+ * schickt bei unterdrueckter Herkunft "Origin: null". Das ist kein fremder
+ * Ursprung — und curl schickt gar keinen Origin, deshalb fiel es in den Tests
+ * vorher nicht auf.
+ */
+test("Origin: null aus dem Browser wird angenommen", async () => {
+  await client.get("/setup/database");
+  await client.post(
+    "/setup/database",
+    { kind: "sqlite", action: "test", _csrf: client.csrf },
+    { headers: { origin: "null", "sec-fetch-site": "same-origin" } },
+  );
+  assert.equal(client.lastStatus, 200);
+  assert.match(client.lastBody, /Connection works/);
+});
+
 test("Schritt 1: SQLite einrichten", async () => {
   await client.get("/setup/database");
   await client.submit("/setup/database", { kind: "sqlite", action: "save" });

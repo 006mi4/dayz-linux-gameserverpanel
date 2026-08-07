@@ -44,7 +44,10 @@ const ASSETS = {
 const SECURITY_HEADERS = {
   "content-security-policy":
     "default-src 'none'; style-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-  "referrer-policy": "no-referrer",
+  // "no-referrer" veranlasst Chrome, bei Formularen "Origin: null" zu senden —
+  // die Herkunftspruefung stand dann vor einem Wert, der nach Angriff aussieht.
+  // "same-origin" haelt die Adresse trotzdem von fremden Zielen fern.
+  "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 };
@@ -349,10 +352,24 @@ export function createHttpServer(app) {
         }
         rc.form = parsed.form;
 
-        // Origin pruefen, wenn der Browser einen mitschickt: der CSRF-Wert
-        // allein wuerde auch reichen, aber beides zusammen ist billig.
+        // Herkunft pruefen, wenn der Browser sie mitschickt. Die eigentliche
+        // Absicherung ist der CSRF-Wert; das hier ist die billige zweite Hürde.
+        //
+        // Sec-Fetch-Site ist dafuer die verlaessliche Angabe: jeder aktuelle
+        // Browser schickt sie, und sie ist eindeutig. "none" heisst: direkt
+        // eingegeben oder aus einem Lesezeichen.
+        const site = req.headers["sec-fetch-site"];
+        if (site && site !== "same-origin" && site !== "none") {
+          log.warn("POST von fremder Seite abgewiesen", { site });
+          rc.error(403, rc.t("error.csrf"), rc.t("error.csrf"));
+          return;
+        }
+        // Origin dagegen kommt als "null" an, sobald der Browser die Herkunft
+        // unterdrueckt — das ist KEIN fremder Ursprung. Genau daran ist der
+        // Assistent im Browser gescheitert, waehrend er per curl (ganz ohne
+        // Origin) lief.
         const origin = req.headers.origin;
-        if (origin && origin !== `${rc.protocol}://${req.headers.host}`) {
+        if (origin && origin !== "null" && origin !== `${rc.protocol}://${req.headers.host}`) {
           log.warn("POST mit fremdem Origin abgewiesen", { origin });
           rc.error(403, rc.t("error.csrf"), rc.t("error.csrf"));
           return;
