@@ -32,6 +32,10 @@ class Job {
     this.finishedAt = null;
     this.secrets = new Set();
     this.pending = null;
+    /** Loest auf, sobald der Vorgang durch ist — egal wie er ausging. */
+    this.completion = new Promise((resolve) => {
+      this.settle = resolve;
+    });
   }
 
   /** Wert von jeder Protokollausgabe fernhalten. */
@@ -119,6 +123,7 @@ export function createJobs() {
           // als der Vorgang, der sie gebraucht hat. Fehlermeldungen sind zu
           // diesem Zeitpunkt schon durch die Streichliste gelaufen.
           job.secrets.clear();
+          job.settle(job);
         });
 
       return { ok: true, job };

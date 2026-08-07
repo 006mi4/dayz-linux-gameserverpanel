@@ -6,6 +6,7 @@ import { createHttpServer } from "./http/server.js";
 import { createJobs } from "./jobs.js";
 import { createThrottle } from "./auth/throttle.js";
 import { createHeartbeat } from "./dzpage/heartbeat.js";
+import { createPoller } from "./dzpage/poller.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
 import { trimEvents } from "./store/events.js";
 import { DATA_DIR } from "./paths.js";
@@ -34,6 +35,7 @@ export async function startPanel({ port, bind } = {}) {
   const app = createApp({ config, db, jobs: createJobs() });
   app.throttle = createThrottle();
   app.heartbeat = createHeartbeat(app);
+  app.poller = createPoller(app);
 
   if (db) {
     await purgeExpiredSessions(db).catch((err) => log.warn(`Sitzungen aufräumen: ${err.message}`));
@@ -58,6 +60,7 @@ export async function startPanel({ port, bind } = {}) {
   if (!config.database) log.info(`Einrichtung offen — Assistent unter ${url}/setup`);
 
   app.heartbeat.start();
+  app.poller.start();
 
   return {
     app,
@@ -66,6 +69,7 @@ export async function startPanel({ port, bind } = {}) {
     port: actual.port,
     async stop() {
       app.heartbeat.stop();
+      app.poller.stop();
       await new Promise((resolve) => server.close(resolve));
       await app.db?.close().catch(() => undefined);
     },

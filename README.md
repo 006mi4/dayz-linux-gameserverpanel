@@ -7,9 +7,10 @@ Das Panel steuert den **Prozess** (installieren, starten, stoppen, Dateien),
 RCon steuert das **Spiel** (Nachrichten, Kick, Ban). Beides zusammen ergibt das,
 was RCon allein nicht kann: einen abgestürzten Server wieder hochholen.
 
-**Stand: Phase 2 (Panel-Kern).** Enthalten sind Dienst, Einrichtungsassistent,
-SQLite/MySQL, Anmeldung mit scrypt, SteamCMD-Installation und der interaktive
-Steam-Login. Das Anlegen und Starten von Spielservern kommt mit Phase 3.
+**Stand: Phasen 1 bis 5 gebaut.** Dienst, Einrichtungsassistent, SQLite/MySQL,
+scrypt-Anmeldung, SteamCMD mit interaktivem Login, Spielserver anlegen und
+installieren, systemd- und Docker-Laufzeit, Fernsteuerung über DZPage samt
+Neustartzeitplan mit Vorwarnung im Spiel.
 
 ---
 
@@ -62,6 +63,62 @@ auf die es ankommt: Läuft der Download später ohne Zutun?
 Der Assistent ist nur erreichbar, solange die Einrichtung läuft; danach liefern
 seine Routen 404. Ab Schritt 3 braucht er eine angemeldete Sitzung — wer später
 an den Port kommt, kann das Panel nicht übernehmen.
+
+## Spielserver
+
+Unter „Spielserver" wird ein Server angelegt: Name, drei Ports, RCon-Passwort,
+Spielerzahl, Mission und die Ressourcengrenzen. Das Panel schreibt daraus
+`serverDZ.cfg`, die BattlEye-Konfiguration und die Startumgebung; ein Klick auf
+„Spieldateien installieren" holt DayZ über SteamCMD (App 223350).
+
+Danach gibt es Starten, Stoppen, Neustarten, Autostart, den Laufzeitwechsel und
+„Bei DZPage anmelden" — letzteres trägt den Server mitsamt RCon-Zugang in dein
+DZPage-Konto ein, ohne dass du dort etwas abtippst.
+
+**Jeder Server läuft unter einem eigenen Benutzer** (`dzsrv_<kennung>`), in
+seinem eigenen Verzeichnis, mit eigenen Speicher- und CPU-Grenzen. Er kann
+weder die Konfiguration des Panels lesen noch die Dateien der Nachbarn.
+
+### Der privilegierte Helfer
+
+Dienste anlegen und Benutzer erzeugen kann kein unprivilegierter Prozess. Das
+Panel läuft trotzdem nicht als root: Es schickt eine Zeile an einen Socket
+(`/run/dzpage-panel-helper.sock`, nur für den Dienstbenutzer geöffnet), und
+systemd startet dafür kurz `helper.sh` als root. Der Helfer kennt genau acht
+Operationen und prüft jeden Parameter gegen ein Muster.
+
+sudo wäre der übliche Weg, funktioniert hier aber nicht: Die Unit des Panels
+setzt über `PrivateDevices` und `ProtectKernelTunables` implizit
+`NoNewPrivileges`, und damit kann sudo keine Rechte mehr erhöhen. Die Alternative
+wäre gewesen, die Härtung aufzuweichen — der Socket ist die bessere Antwort.
+
+### Laufzeit: systemd oder Docker
+
+Standard ist systemd. Docker ist eine Umschaltung im Panel, kein zweiter
+Installationsweg: Die Spieldateien bleiben, wo sie sind, und werden in den
+Container eingehängt — ein Wechsel kostet keinen Neu-Download.
+
+Für die Docker-Laufzeit einmalig `sudo ./install.sh --with-docker`. Damit kommt
+der Dienstbenutzer in die Gruppe `docker`, und das entspricht auf dieser
+Maschine faktisch Rootrechten. Das liegt an Docker, nicht am Panel — wer diese
+Laufzeit nicht braucht, lässt die Option weg.
+
+Das Container-Abbild ist über `DZPAGE_PANEL_DOCKER_IMAGE` einstellbar
+(Standard `debian:bookworm-slim`); es muss die Bibliotheken mitbringen, die der
+DayZ-Server erwartet.
+
+## Fernsteuerung über DZPage
+
+Sobald ein Server registriert ist, hat er auf dzpage.com unter RCon den
+Abschnitt „Betrieb": starten, stoppen, neu starten, Dateien aktualisieren und
+einen Neustartzeitplan. Die Vorwarnung im Spiel geht über RCon, der Neustart
+über das Panel — diese Kombination braucht beide Hälften.
+
+Das Panel hält dafür eine ausgehende Verbindung offen (Long-Poll) und holt sich
+Aufträge ab. **Es muss kein Port geöffnet werden**, und es funktioniert hinter
+CGNAT. Jeder Auftrag wird geprüft, bevor er ausgeführt wird: bekannte
+Auftragsart, Zielserver gehört zu diesem Panel, Ergebnis geht zurück, alles
+landet im Ereignisprotokoll.
 
 ## Von außen erreichbar machen
 
@@ -152,9 +209,19 @@ zwei Minuten und ist kein Fehler.
 ## Entwicklung
 
 ```sh
-npm test                     # 44 Tests, ohne Netz und ohne Datenbankserver
+npm test                     # ohne Netz, ohne Datenbankserver, ohne Rootrechte
 DZPANEL_NET_TESTS=1 npm test # zusätzlich die echte SteamCMD-Installation
 ```
+
+Zwei Abnahmen brauchen ein echtes System und laufen deshalb getrennt:
+
+```sh
+sudo ./scripts/verify-runtime.sh   # systemd: eigener Benutzer, Grenzen, Absturz, Aufräumen
+sudo ./scripts/verify-docker.sh    # Docker und der Wechsel zwischen beiden Laufzeiten
+```
+
+Beide setzen ein installiertes Panel voraus und benutzen an Stelle von DayZ ein
+Ersatzprogramm — die echten Spieldateien brauchen ein Steam-Konto mit DayZ.
 
 Für den MySQL-Teil eine Datenbank angeben:
 

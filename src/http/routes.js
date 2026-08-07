@@ -3,6 +3,7 @@ import * as auth from "../routes/auth.js";
 import * as dashboard from "../routes/dashboard.js";
 import * as steam from "../routes/steam.js";
 import * as dzpage from "../routes/dzpage.js";
+import * as servers from "../routes/servers.js";
 
 /**
  * Feste Routentabelle. Es gibt keine dynamischen Pfade und keine Platzhalter —
@@ -32,6 +33,14 @@ export const ROUTES = [
   { path: "/steam", methods: ["GET", "POST"], access: "user", handler: steam.page },
   { path: "/steam/status", methods: ["GET", "POST"], access: "user", handler: steam.status },
   { path: "/dzpage", methods: ["GET", "POST"], access: "user", handler: dzpage.connect },
+
+  // Spielserver. Die Kennung steht in der Abfrage statt im Pfad, damit die
+  // Routentabelle ohne Platzhalter auskommt.
+  { path: "/servers", methods: ["GET"], access: "user", handler: servers.list },
+  { path: "/servers/new", methods: ["GET", "POST"], access: "user", handler: servers.create },
+  { path: "/server", methods: ["GET"], access: "user", handler: servers.detail },
+  { path: "/server/action", methods: ["POST"], access: "user", handler: servers.act },
+  { path: "/job", methods: ["GET"], access: "user", handler: servers.jobPage },
 ];
 
 /** Fuer den Installer und fuer Ueberwachung: eine Zeile, keine Details. */

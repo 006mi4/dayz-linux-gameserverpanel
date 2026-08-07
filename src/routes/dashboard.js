@@ -1,5 +1,6 @@
 import { getSettings, KEYS } from "../store/settings.js";
 import { listEvents } from "../store/events.js";
+import { listServers } from "../store/servers.js";
 import { escapeHtml, relativeTime } from "../http/html.js";
 
 /**
@@ -56,6 +57,19 @@ async function dashboard(rc) {
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`)
     .join("");
 
+  const servers = await listServers(rc.app.db);
+  const serverBlock = servers.length
+    ? `<ul class="events">${servers
+        .map(
+          (server) =>
+            `<li><a href="/server?id=${escapeHtml(server.id)}">${escapeHtml(server.name)}</a>
+             <time>${Number(server.game_port)} · ${escapeHtml(
+               t(`servers.installState.${server.install_state}`),
+             )}</time></li>`,
+        )
+        .join("")}</ul>`
+    : `<p class="lede">${escapeHtml(t("dash.serversEmpty"))}</p>`;
+
   const events = await listEvents(rc.app.db, 12);
   const eventList = events.length
     ? `<ul class="events">${events
@@ -78,7 +92,8 @@ async function dashboard(rc) {
      </div>
      <div class="card">
        <h2>${escapeHtml(t("dash.servers"))}</h2>
-       <p class="lede">${escapeHtml(t("dash.serversEmpty"))}</p>
+       ${serverBlock}
+       <div class="actions"><a class="button" href="/servers">${escapeHtml(t("servers.title"))}</a></div>
      </div>
      <div class="card">
        <h2>${escapeHtml(t("dash.events"))}</h2>

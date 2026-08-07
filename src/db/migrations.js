@@ -82,6 +82,52 @@ export const MIGRATIONS = [
       `CREATE INDEX events_at ON events(at)`,
     ],
   },
+  {
+    id: 2,
+    name: "server",
+    sqlite: [
+      `CREATE TABLE servers (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         game_port INTEGER NOT NULL,
+         query_port INTEGER NOT NULL,
+         rcon_port INTEGER NOT NULL,
+         rcon_password_enc TEXT NOT NULL,
+         max_players INTEGER NOT NULL DEFAULT 60,
+         mission TEXT NOT NULL DEFAULT 'dayzOffline.chernarusplus',
+         runtime TEXT NOT NULL DEFAULT 'systemd',
+         memory_max_mb INTEGER NOT NULL DEFAULT 6144,
+         cpu_quota INTEGER NOT NULL DEFAULT 400,
+         install_state TEXT NOT NULL DEFAULT 'new',
+         installed_at INTEGER,
+         autostart INTEGER NOT NULL DEFAULT 1,
+         dzpage_server_id TEXT,
+         created_at INTEGER NOT NULL
+       )`,
+      `CREATE UNIQUE INDEX servers_game_port ON servers(game_port)`,
+    ],
+    mysql: [
+      `CREATE TABLE servers (
+         id VARCHAR(32) NOT NULL PRIMARY KEY,
+         name VARCHAR(80) NOT NULL,
+         game_port INT NOT NULL,
+         query_port INT NOT NULL,
+         rcon_port INT NOT NULL,
+         rcon_password_enc VARCHAR(255) NOT NULL,
+         max_players INT NOT NULL DEFAULT 60,
+         mission VARCHAR(80) NOT NULL DEFAULT 'dayzOffline.chernarusplus',
+         runtime VARCHAR(20) NOT NULL DEFAULT 'systemd',
+         memory_max_mb INT NOT NULL DEFAULT 6144,
+         cpu_quota INT NOT NULL DEFAULT 400,
+         install_state VARCHAR(20) NOT NULL DEFAULT 'new',
+         installed_at BIGINT,
+         autostart TINYINT NOT NULL DEFAULT 1,
+         dzpage_server_id VARCHAR(40),
+         created_at BIGINT NOT NULL
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+      `CREATE UNIQUE INDEX servers_game_port ON servers(game_port)`,
+    ],
+  },
 ];
 
 const VERSION_TABLE = {

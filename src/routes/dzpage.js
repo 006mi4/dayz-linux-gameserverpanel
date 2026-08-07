@@ -93,7 +93,11 @@ export async function connect(rc) {
     message: `Panel bei DZPage angemeldet (${result.account || "Konto unbekannt"})`,
   });
   log.info(`Panel bei DZPage angemeldet: ${result.panelId}`);
+  // Beide Schleifen brauchen den Schluessel, den es beim Start des Dienstes
+  // noch nicht gab — ohne den Neustart des Abholers bliebe der erste Auftrag
+  // von DZPage bis zum naechsten Dienstneustart liegen.
   rc.app.heartbeat?.restart();
+  rc.app.poller?.restart();
 
   if (inSetup) {
     rc.redirect("/setup/done");

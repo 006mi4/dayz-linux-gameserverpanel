@@ -1,0 +1,14 @@
+[Unit]
+Description=DZPage Panel — privilegierter Helfer (%i)
+
+[Service]
+Type=oneshot
+# Anfrage kommt ueber den Socket herein, Antwort geht denselben Weg zurueck.
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+ExecStart=/usr/lib/dzpage-panel/helper.sh --stdin
+# Eine Installation kann dauern; Dienste anlegen dauert Sekunden. 10 Minuten
+# sind grosszuegig und verhindern trotzdem, dass etwas ewig haengt.
+TimeoutStartSec=600
+SyslogIdentifier=dzpage-panel-helper

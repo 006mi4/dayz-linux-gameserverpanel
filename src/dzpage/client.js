@@ -30,21 +30,25 @@ export class DzpageClient {
     return typeof this.key === "string" && this.key.startsWith(PANEL_KEY_PREFIX);
   }
 
-  async post(path, body) {
+  /**
+   * Eine Anfrage an die Panel-API. Der Long-Poll braucht eine laengere Frist
+   * als der Rest — deshalb ist sie hier einstellbar statt fest.
+   */
+  async request(method, path, body = null, { timeoutMs = TIMEOUT_MS, signal } = {}) {
     if (!this.hasKey) return { ok: false, code: "missing_key" };
 
     let response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method: "POST",
+        method,
         headers: {
           authorization: `Bearer ${this.key}`,
-          "content-type": "application/json",
+          ...(body === null ? {} : { "content-type": "application/json" }),
           accept: "application/json",
           "user-agent": `dzpage-panel/${PANEL_VERSION}`,
         },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        ...(body === null ? {} : { body: JSON.stringify(body) }),
+        signal: signal ?? AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       // Zeitueberschreitung und Namensauflösung landen beide hier.
@@ -65,6 +69,10 @@ export class DzpageClient {
     if (response.status === 400) return { ok: false, code: payload?.error || "bad_request" };
     if (response.status === 404) return { ok: false, code: payload?.error || "unknown_panel" };
     return { ok: false, code: "server", status: response.status };
+  }
+
+  post(path, body) {
+    return this.request("POST", path, body);
   }
 
   register({ name, version = PANEL_VERSION, platform = platformLabel() }) {

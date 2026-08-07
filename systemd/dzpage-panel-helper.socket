@@ -1,0 +1,16 @@
+[Unit]
+Description=DZPage Panel — Socket des privilegierten Helfers
+
+[Socket]
+# Nur der Dienstbenutzer darf diesen Socket oeffnen. Damit braucht das Panel
+# weder sudo noch Rootrechte, und seine eigene Unit bleibt voll gehaertet.
+ListenStream=/run/dzpage-panel-helper.sock
+SocketUser=dzpage
+SocketGroup=dzpage
+SocketMode=0600
+# Je Verbindung eine eigene, kurzlebige Ausfuehrung als root.
+Accept=yes
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

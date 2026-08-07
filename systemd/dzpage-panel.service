@@ -26,7 +26,11 @@ CPUQuota=200%
 
 # Absicherung: Das Panel startet fremde Prozesse, hat aber selbst fast nichts
 # zu suchen. Was SteamCMD und die Spieldateien brauchen, steht in ReadWritePaths.
-NoNewPrivileges=yes
+# NoNewPrivileges steht hier bewusst NICHT: Dienste anlegen und Benutzer
+# erzeugen kann nur root, und das Panel macht das ueber sudo mit genau einem
+# erlaubten Programm (helper.sh, feste Operationen, geprueften Parametern).
+# NoNewPrivileges wuerde sudo unmoeglich machen — dann muesste das Panel selbst
+# als root laufen, und das waere deutlich schlechter.
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict

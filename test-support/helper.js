@@ -102,8 +102,9 @@ export class Client {
  * inklusive der Fehlercodes aus src/lib/panel/api.ts.
  */
 export async function startDzpageStub({ key = "dzp_panel_testkey", account = "TestKonto" } = {}) {
-  const calls = { register: [], heartbeat: [] };
+  const calls = { register: [], heartbeat: [], servers: [], results: [], polls: 0 };
   const state = { revoked: false, unknownPanel: false };
+  const queue = [];
 
   const server = createServer((req, res) => {
     let body = "";
@@ -118,15 +119,33 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
       if (given !== key) return send(401, { ok: false, error: "invalid_key" });
       if (state.revoked) return send(403, { ok: false, error: "revoked" });
 
+      const path = req.url.split("?")[0];
       const payload = body ? JSON.parse(body) : {};
-      if (req.url === "/api/panel/v1/register") {
+
+      if (path === "/api/panel/v1/register") {
         calls.register.push(payload);
         return send(200, { ok: true, panelId: "panel123456", account, heartbeatSeconds: 60 });
       }
-      if (req.url === "/api/panel/v1/heartbeat") {
+      if (path === "/api/panel/v1/heartbeat") {
         calls.heartbeat.push(payload);
         if (state.unknownPanel) return send(404, { ok: false, error: "unknown_panel" });
         return send(200, { ok: true, heartbeatSeconds: 60 });
+      }
+      if (path === "/api/panel/v1/servers") {
+        if (req.method === "DELETE") return send(200, { ok: true, removed: 1 });
+        calls.servers.push(payload);
+        return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7" });
+      }
+      if (path === "/api/panel/v1/poll") {
+        // POST ist die Rueckmeldung, GET das Abholen.
+        if (req.method === "POST") {
+          calls.results.push(payload);
+          return send(200, { ok: true });
+        }
+        calls.polls += 1;
+        const jobs = queue.splice(0, queue.length);
+        // Kein echtes Warten: der Test soll nicht 25 Sekunden dauern.
+        return send(200, { ok: true, jobs });
       }
       return send(404, { ok: false, error: "not_found" });
     });
@@ -138,6 +157,10 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
     key,
     calls,
     state,
+    /** Auftrag einreihen, den der naechste Long-Poll abholt. */
+    queueJob(job) {
+      queue.push({ createdAt: new Date().toISOString(), ...job });
+    },
     async stop() {
       await new Promise((resolve) => server.close(resolve));
     },

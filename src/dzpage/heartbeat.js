@@ -1,5 +1,6 @@
 import { DzpageClient } from "./client.js";
 import { getSetting, KEYS, setSetting } from "../store/settings.js";
+import { countServers } from "../store/servers.js";
 import { recordEvent } from "../store/events.js";
 import { log } from "../log.js";
 
@@ -33,7 +34,8 @@ export function createHeartbeat(app) {
         stop();
         return;
       }
-      const result = await client().heartbeat({ panelId, serverCount: 0 });
+      const serverCount = await countServers(app.db).catch(() => 0);
+      const result = await client().heartbeat({ panelId, serverCount });
 
       if (result.ok) {
         backoffMs = 0;

@@ -5,6 +5,7 @@
 #   sudo ./install.sh                  Installation oder Aktualisierung
 #   sudo ./install.sh --no-steam-deps  ohne 32-Bit-Bibliotheken fuer SteamCMD
 #   sudo ./install.sh --no-node        keine eigene Node-Laufzeit installieren
+#   sudo ./install.sh --with-docker    Docker-Laufzeit freischalten (siehe README)
 #
 # Das Skript ist mehrfach ausfuehrbar: ein zweiter Lauf aktualisiert die
 # Dateien und startet den Dienst neu, ohne Konfiguration oder Daten anzufassen.
@@ -20,10 +21,12 @@ SOURCE_DIR=$(cd "$(dirname "$0")" && pwd)
 
 WITH_STEAM_DEPS=1
 WITH_NODE_INSTALL=1
+WITH_DOCKER=0
 for arg in "$@"; do
   case "$arg" in
     --no-steam-deps) WITH_STEAM_DEPS=0 ;;
     --no-node) WITH_NODE_INSTALL=0 ;;
+    --with-docker) WITH_DOCKER=1 ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $arg" >&2; exit 2 ;;
   esac
@@ -122,10 +125,25 @@ if ! "$NODE_BIN" -e 'require("node:sqlite")' >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------- Benutzer und Verzeichnisse
+if [ "$WITH_DOCKER" -eq 1 ]; then
+  say "Docker-Laufzeit"
+  if ! command -v docker >/dev/null 2>&1; then
+    die "Docker ist nicht installiert — erst Docker einrichten, dann erneut mit --with-docker."
+  fi
+  # Ehrlich bleiben: Wer in der docker-Gruppe ist, kann auf dieser Maschine
+  # alles. Das liegt an Docker, nicht am Panel — aber wissen sollte man es.
+  note "ACHTUNG: Der Dienstbenutzer kommt in die Gruppe docker."
+  note "Das entspricht auf dieser Maschine faktisch Rootrechten — so ist Docker gebaut."
+fi
+
 say "Dienstbenutzer und Verzeichnisse"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
   note "Benutzer $SERVICE_USER angelegt"
+fi
+if [ "$WITH_DOCKER" -eq 1 ]; then
+  usermod -aG docker "$SERVICE_USER"
+  note "$SERVICE_USER ist jetzt in der Gruppe docker"
 fi
 
 # Das Konfigurationsverzeichnis gehoert dem Dienst, nicht root: das Panel legt
@@ -145,6 +163,25 @@ for item in bin src public package.json systemd; do
 done
 chown -R root:root "$APP_DIR/bin" "$APP_DIR/src" "$APP_DIR/public" "$APP_DIR/package.json"
 note "$(du -sh "$APP_DIR" | cut -f1) installiert"
+
+# Das Hilfsprogramm gehoert root und darf vom Dienstbenutzer nicht veraenderbar
+# sein — sonst waere die sudo-Regel wertlos.
+install -m 0755 -o root -g root "$SOURCE_DIR/helper/dzpage-panel-helper.sh" "$APP_DIR/helper.sh"
+install -m 0755 -o root -g root "$SOURCE_DIR/helper/launch-server.sh" "$APP_DIR/launch-server.sh"
+for unit in dzpage-server@.service dzpage-panel-helper.socket dzpage-panel-helper@.service; do
+  install -m 0644 -o root -g root "$SOURCE_DIR/systemd/$unit" "/etc/systemd/system/$unit"
+done
+
+say "Privilegierter Helfer"
+# Kein sudo: Die Unit des Panels ist gehaertet, und Optionen wie PrivateDevices
+# setzen implizit NoNewPrivileges — sudo koennte dann gar nichts mehr erhoehen.
+# Stattdessen ein Socket, den nur der Dienstbenutzer oeffnen darf; systemd
+# startet den Helfer je Anfrage als root.
+rm -f /etc/sudoers.d/dzpage-panel
+systemctl daemon-reload
+systemctl enable --quiet dzpage-panel-helper.socket
+systemctl restart dzpage-panel-helper.socket
+note "Socket: $(systemctl is-active dzpage-panel-helper.socket) (/run/dzpage-panel-helper.sock)"
 
 # ---------------------------------------------------------------- Dienst
 say "systemd-Dienst"

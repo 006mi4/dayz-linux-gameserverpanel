@@ -1,0 +1,48 @@
+[Unit]
+Description=DayZ server %i (DZPage Panel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Benutzer, Speicher- und CPU-Grenze setzt das Panel je Server als Ergaenzung
+# unter /etc/systemd/system/dzpage-server@<id>.service.d/panel.conf. Diese
+# Vorlage selbst wird nie veraendert — sie liegt einmal da und gilt fuer alle.
+User=dzpage
+Group=dzpage
+WorkingDirectory=/var/lib/dzpage-panel/servers/%i
+# HOME zeigt in das Serververzeichnis: DayZ sucht ~/.steam/sdk64/steamclient.so
+# und legt dort weitere Dateien ab — die gehoeren zu diesem Server, nicht zum Panel.
+Environment=HOME=/var/lib/dzpage-panel/servers/%i
+EnvironmentFile=-/var/lib/dzpage-panel/servers/%i/server.env
+ExecStart=/usr/lib/dzpage-panel/launch-server.sh %i
+Restart=on-failure
+RestartSec=10
+# DayZ speichert beim Beenden; 45 Sekunden sind genug und verhindern, dass ein
+# haengender Server den Neustart blockiert.
+TimeoutStopSec=45
+
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Nur das eigene Verzeichnis ist beschreibbar, und die Panel-Geheimnisse sind
+# unsichtbar: Ein uebernommener Spielserver darf weder an die Konfiguration des
+# Panels noch an die Dateien der anderen Server.
+ReadWritePaths=/var/lib/dzpage-panel/servers/%i
+InaccessiblePaths=/etc/dzpage-panel
+# Kein SystemCallFilter: DayZ ist eine fremde Binaerdatei, und ein zu enger
+# Filter aeussert sich als unerklaerlicher Absturz beim Kunden.
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dzpage-server-%i
+
+[Install]
+WantedBy=multi-user.target
