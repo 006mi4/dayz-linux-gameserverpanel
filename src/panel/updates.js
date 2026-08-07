@@ -349,6 +349,12 @@ export function createPanelUpdateWatcher(app, { fetchImpl = fetch } = {}) {
     timer = null;
     if (stopped) return;
     try {
+      // Das Ergebnis der letzten Aktualisierung steht erst fest, nachdem das
+      // Panel schon wieder laeuft: install.sh startet den Dienst und wartet auf
+      // /health, und erst danach schreibt self-update.sh die Datei. Beim Start
+      // ist sie also noch "running" — hier ist sie fertig.
+      if (app.db) await announceSelfUpdateResult(app).catch(() => undefined);
+
       if (await ready()) {
         lastCheck = Date.now();
         const { latest, newer } = await checkPanelUpdate(app, { fetchImpl });

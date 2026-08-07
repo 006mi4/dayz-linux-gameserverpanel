@@ -424,13 +424,18 @@ export async function act(rc) {
 
   try {
     switch (action) {
+      // Vor dem Starten einrichten. prepare ist wiederholbar und tut nur, was
+      // fehlt — aber es holt einen Server zurueck, dessen Benutzer oder Unit
+      // abgeraeumt wurde. Ohne das bleibt so einer fuer immer unstartbar.
       case "start":
+        await runtime.prepare(server);
         await runtime.start(server);
         break;
       case "stop":
         await runtime.stop(server);
         break;
       case "restart":
+        await runtime.prepare(server);
         await runtime.restart(server);
         break;
       case "autostart-on":
@@ -524,11 +529,26 @@ async function switchRuntime(rc, server, target) {
   if (!availableRuntimes().includes(target)) throw new Error(`Laufzeit ${target} steht hier nicht zur Verfügung.`);
   const current = runtimeFor(server);
   const next = runtimeFor(target);
-
-  await current.stop(server).catch(() => undefined);
-  await current.destroy(server).catch(() => undefined);
   const updated = { ...server, runtime: target };
+
+  // Erst die neue Laufzeit einrichten, dann die alte abraeumen. Andersherum
+  // steht der Server ohne beides da, wenn die neue nicht mitspielt — genau das
+  // ist passiert, als jemand ohne Docker-Freischaltung auf Docker umgestellt
+  // hat: Benutzer und Unit waren weg, Docker antwortete nicht, und der Server
+  // liess sich danach nicht mehr starten.
   await next.prepare(updated);
+
+  try {
+    await current.stop(server);
+  } catch (err) {
+    log.debug(`Alte Laufzeit von ${server.id} liess sich nicht anhalten: ${err.message}`);
+  }
+  try {
+    await current.destroy(server);
+  } catch (err) {
+    log.warn(`Alte Laufzeit von ${server.id} nicht aufgeraeumt: ${err.message}`);
+  }
+
   await updateServer(rc.app.db, server.id, { runtime: target });
   log.info(`Server ${server.id} laeuft jetzt unter ${target}`);
 }

@@ -162,8 +162,18 @@ fi
 # panel.json atomar an (Nebendatei, dann umbenennen) und braucht dafuer
 # Schreibrecht im Verzeichnis selbst. Die Datei bleibt 0600.
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/servers"
+#
+# 0751 und nicht 0750: Jeder Spielserver laeuft unter einem eigenen Benutzer und
+# muss durch diese beiden Verzeichnisse hindurch in sein eigenes kommen —
+# durchgehen darf er, hineinsehen nicht. Genau das setzt auch der Helfer beim
+# Anlegen eines Servers.
+#
+# Das steht hier, weil install.sh laengst nicht mehr nur einmal laeuft: Seit der
+# Selbstaktualisierung laeuft er bei jeder neuen Panel-Fassung. Ein 0750 an
+# dieser Stelle nimmt jedem vorhandenen Spielserver den Weg in sein Verzeichnis,
+# und er scheitert beim naechsten Start mit "200/CHDIR" — einmal live erlebt.
+install -d -m 0751 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
+install -d -m 0751 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/servers"
 note "$CONFIG_DIR und $DATA_DIR bereit"
 
 # ---------------------------------------------------------------- Dateien

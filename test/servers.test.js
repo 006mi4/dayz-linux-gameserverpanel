@@ -23,6 +23,9 @@ chmodSync(FAKE_HELPER, 0o755);
 
 process.env.DZPAGE_PANEL_HELPER = FAKE_HELPER;
 process.env.DZPAGE_PANEL_SUDO = "";
+// Docker gibt es in der Suite nicht — der Pfad ins Leere macht das eindeutig,
+// statt sich darauf zu verlassen, dass auf der Maschine keins installiert ist.
+process.env.DZPAGE_PANEL_DOCKER = join(env.root, "kein-docker");
 process.env.DZPANEL_FAKE_STATE = join(env.root, "fake-helper");
 
 const { checkServerInput, DEFAULTS, serverDir } = await import("../src/store/servers.js");
@@ -261,4 +264,49 @@ test("Aufträge von DZPage werden geprüft und ausgeführt", async () => {
   assert.match(unknown.detail, /Unbekannte Auftragsart/);
 
   panel.app.poller.stop();
+});
+
+test("Vor dem Starten wird eingerichtet", async () => {
+  const serverId = await createServer({
+    name: "Heilserver",
+    gamePort: "2502",
+    queryPort: "27216",
+    rconPort: "2506",
+    rconPassword: "rcon-geheim-4",
+    maxPlayers: "20",
+  });
+
+  await client.get(`/server?id=${serverId}`);
+  await client.submit("/server/action", { id: serverId, action: "start" });
+  // prepare legt Benutzer, Rechte und Drop-in an. Ohne diesen Aufruf bleibt ein
+  // Server, dessen Einrichtung einmal abgeraeumt wurde, fuer immer unstartbar —
+  // genau das ist auf einem echten Server passiert.
+  const calls = helperCalls();
+  const prepared = calls.findIndex((line) => line.startsWith(`prepare ${serverId}`));
+  const started = calls.findIndex((line) => line === `start ${serverId}`);
+  assert.ok(prepared >= 0, "prepare muss aufgerufen worden sein");
+  assert.ok(started > prepared, `start muss danach kommen: ${calls.join(" | ")}`);
+});
+
+test("Ein misslungener Laufzeitwechsel lässt den Server heil", async () => {
+  const serverId = await createServer({
+    name: "Wechselserver",
+    gamePort: "2602",
+    queryPort: "27316",
+    rconPort: "2606",
+    rconPassword: "rcon-geheim-5",
+    maxPlayers: "20",
+  });
+  const before = helperCalls().length;
+
+  // Docker gibt es in dieser Umgebung nicht, also scheitert prepare. Frueher
+  // hat der Wechsel die alte Laufzeit vorher abgeraeumt: Benutzer weg, Unit
+  // weg, neue Laufzeit nicht da — der Server war danach nicht mehr zu starten.
+  await client.get(`/server?id=${serverId}`);
+  await client.submit("/server/action", { id: serverId, action: "runtime-docker" });
+
+  const row = await panel.app.db.get("SELECT runtime FROM servers WHERE id = ?", [serverId]);
+  assert.equal(row.runtime, "systemd", "die Laufzeit darf erst nach dem Gelingen umgestellt werden");
+  const calls = helperCalls().slice(before).join("\n");
+  assert.doesNotMatch(calls, new RegExp(`destroy ${serverId}`), "nichts darf abgeraeumt worden sein");
 });

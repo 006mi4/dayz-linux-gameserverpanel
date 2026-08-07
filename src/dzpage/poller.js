@@ -45,6 +45,11 @@ export function createPoller(app) {
       if (!server) throw new Error("Der Auftrag nennt einen Server, den dieses Panel nicht kennt.");
 
       const runtime = runtimeFor(server);
+      // Wie in der Oberflaeche: vor dem Starten einrichten. Ein Neustart aus
+      // der Ferne ist genau der Moment, in dem niemand danebensteht und
+      // nachhelfen kann.
+      if (job.kind === "start" || job.kind === "restart") await runtime.prepare(server);
+
       if (job.kind === "start") await runtime.start(server);
       else if (job.kind === "stop") await runtime.stop(server);
       else if (job.kind === "restart") await runtime.restart(server);

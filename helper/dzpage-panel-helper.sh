@@ -71,7 +71,14 @@ cmd_prepare() {
 
   id -u "$user" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
   mkdir -p "$dir/game" "$dir/profiles/battleye"
-  fix_permissions "$id" "$dir"
+
+  # Die Rechte nur richten, wenn sie nicht schon stimmen: Ein chown -R ueber
+  # sechs Gigabyte Spieldateien kostet Zeit, und prepare laeuft inzwischen vor
+  # jedem Start — damit ein Server, dessen Einrichtung einmal abgeraeumt wurde,
+  # von selbst wieder hochkommt.
+  if [ "$(stat -c '%U:%G' "$dir")" != "$PANEL_USER:$user" ]; then
+    fix_permissions "$id" "$dir"
+  fi
 
   # Durchgangsrecht, aber kein Leserecht: der Serverbenutzer kommt in sein
   # eigenes Verzeichnis, sieht aber weder die Nachbarn noch die Panel-Datenbank.
@@ -79,7 +86,7 @@ cmd_prepare() {
 
   dropin=$DROPIN_ROOT/$unit.d
   mkdir -p "$dropin"
-  cat > "$dropin/panel.conf" <<EOF
+  cat > "$dropin/panel.conf.new" <<EOF
 # Von dzpage-panel erzeugt. Aenderungen werden ueberschrieben.
 [Service]
 User=$user
@@ -87,8 +94,15 @@ Group=$user
 MemoryMax=${memory}M
 CPUQuota=${cpu}%
 EOF
-  chmod 0644 "$dropin/panel.conf"
-  systemctl daemon-reload
+  chmod 0644 "$dropin/panel.conf.new"
+  # daemon-reload nur, wenn sich wirklich etwas geaendert hat — sonst zahlt
+  # jeder Start dafuer, dass systemd seine ganze Konfiguration neu liest.
+  if cmp -s "$dropin/panel.conf.new" "$dropin/panel.conf"; then
+    rm -f "$dropin/panel.conf.new"
+  else
+    mv "$dropin/panel.conf.new" "$dropin/panel.conf"
+    systemctl daemon-reload
+  fi
   echo "prepared $id"
 }
 

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
@@ -37,11 +37,36 @@ function normalise(params) {
   });
 }
 
+/**
+ * Die Datenbank ist nichts fuer andere Benutzer der Maschine.
+ *
+ * node:sqlite legt ihre Dateien mit der umask des Prozesses an, und das ergibt
+ * ueblicherweise 0644. Das Datenverzeichnis muss aber durchlaessig sein (0751),
+ * damit jeder Spielserver unter seinem eigenen Benutzer in sein Verzeichnis
+ * kommt — womit die Datenbank fuer jeden lesbar waere, der ihren Pfad kennt.
+ * Darin stehen Passwort-Hashes und die verschluesselten RCon-Passwoerter.
+ */
+function restrictFiles(file) {
+  for (const path of [file, `${file}-wal`, `${file}-shm`]) {
+    try {
+      chmodSync(path, 0o640);
+    } catch {
+      // Die Begleitdateien gibt es erst nach dem ersten Schreiben.
+    }
+  }
+}
+
 export async function openSqlite(dbConfig) {
   const { DatabaseSync } = await loadSqlite();
   const file = dbConfig.file;
   if (!file) throw new Error("Fuer SQLite fehlt der Dateipfad.");
-  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true, mode: 0o750 });
+  if (file !== ":memory:") {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o750 });
+    // Vor dem Oeffnen: SQLite gibt den Begleitdateien (-wal, -shm) die Rechte
+    // der Hauptdatei. Danach waere es zu spaet, sie entstehen mit dem WAL-Pragma.
+    closeSync(openSync(file, "a", 0o640));
+    restrictFiles(file);
+  }
 
   const db = new DatabaseSync(file);
   // WAL haelt Lesen und Schreiben auseinander; busy_timeout verhindert, dass
@@ -50,6 +75,7 @@ export async function openSqlite(dbConfig) {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA synchronous = NORMAL");
+  if (file !== ":memory:") restrictFiles(file);
 
   return {
     kind: "sqlite",
