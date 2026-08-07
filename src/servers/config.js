@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { serverDir } from "../store/servers.js";
 
@@ -99,9 +99,51 @@ export function checkCfgEntry(key, value) {
 }
 
 /**
- * Die gespeicherte Konfiguration eines Servers. Fehlt sie oder ist sie
- * unbrauchbar, gilt der Auslieferungszustand — eine leere Liste dagegen ist
- * eine Ansage und bleibt leer.
+ * Eine vorhandene serverDZ.cfg lesen.
+ *
+ * Nur einfache Zeilen `schluessel = wert;` ausserhalb von Bloecken; was in
+ * `class … { … }` steht, gehoert dem Panel. Der Wert wird genommen, wie er
+ * dasteht — Anfuehrungszeichen inklusive. Damit kommt beim Schreiben wieder
+ * genau dieselbe Zeile heraus (formatCfgValue laesst alles durch, was schon in
+ * Konfigurationsschreibweise steht).
+ */
+export function parseCfg(text) {
+  const entries = [];
+  let depth = 0;
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("//")) continue;
+    const opened = (line.match(/\{/g) || []).length;
+    const closed = (line.match(/\}/g) || []).length;
+    const wasInside = depth > 0;
+    depth += opened - closed;
+    if (wasInside || depth > 0 || /^class\b/.test(line)) continue;
+
+    const match = /^([A-Za-z_][A-Za-z0-9_]{0,39}(?:\[\])?)\s*=\s*(.+?);?\s*$/.exec(line);
+    if (!match || MANAGED_KEYS.has(match[1])) continue;
+    entries.push([match[1], cleanCfgValue(match[2])]);
+  }
+  return entries;
+}
+
+function configFromFile(id) {
+  try {
+    return parseCfg(readFileSync(join(serverDir(id), "serverDZ.cfg"), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Die gespeicherte Konfiguration eines Servers.
+ *
+ * Die Reihenfolge der Quellen ist Absicht:
+ * 1. Was im Panel eingetragen wurde. Eine leere Liste ist dabei eine Ansage
+ *    und bleibt leer.
+ * 2. Sonst die vorhandene Datei. Wer sie vor dieser Fassung von Hand angepasst
+ *    hat, findet seine Werte im Panel wieder, statt sie beim ersten Speichern
+ *    zu verlieren.
+ * 3. Sonst der Auslieferungszustand.
  */
 export function serverConfig(server) {
   const raw = server?.config_json;
@@ -117,7 +159,9 @@ export function serverConfig(server) {
       // Kaputtes JSON darf keinen Server unstartbar machen.
     }
   }
-  return defaultConfig(server);
+
+  const fromFile = server?.id ? configFromFile(server.id) : [];
+  return fromFile.length ? fromFile : defaultConfig(server);
 }
 
 export function serverDzCfg(server) {

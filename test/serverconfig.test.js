@@ -23,7 +23,7 @@ chmodSync(FAKE_HELPER, 0o755);
 process.env.DZPAGE_PANEL_HELPER = FAKE_HELPER;
 process.env.DZPANEL_FAKE_STATE = join(env.root, "fake-helper");
 
-const { checkCfgEntry, defaultConfig, formatCfgValue, serverConfig, serverDzCfg, writeServerFiles } =
+const { checkCfgEntry, defaultConfig, formatCfgValue, parseCfg, serverConfig, serverDzCfg, writeServerFiles } =
   await import("../src/servers/config.js");
 const { serverDir } = await import("../src/store/servers.js");
 
@@ -84,6 +84,42 @@ test("Kaputtes JSON macht keinen Server unstartbar", () => {
   assert.deepEqual(serverConfig({ ...base, config_json: '[["hostname","fremd"],["respawnTime","9"]]' }), [
     ["respawnTime", "9"],
   ]);
+});
+
+test("Eine von Hand angepasste Datei geht nicht verloren", () => {
+  // Wer vor dieser Fassung in der Datei etwas geaendert hat, soll seine Werte
+  // im Panel wiederfinden — nicht beim ersten Speichern verlieren.
+  const text = `// Von dzpage-panel erzeugt.
+hostname = "Alt";
+maxPlayers = 60;
+steamQueryPort = 27016;
+respawnTime = 30;
+disable3rdPerson = 1;
+motd[] = {"Von Hand","Zweite Zeile"};
+class Missions
+{
+    class DayZ
+    {
+        template = "dayzOffline.chernarusplus";
+    };
+};
+`;
+  const entries = parseCfg(text);
+  // Was das Panel selbst setzt und was im Block steht, gehoert nicht dazu.
+  assert.deepEqual(entries.map(([key]) => key), ["respawnTime", "disable3rdPerson", "motd[]"]);
+  assert.equal(entries[2][1], '{"Von Hand","Zweite Zeile"}');
+
+  // Und die Werte kommen unveraendert wieder heraus.
+  const again = serverDzCfg({
+    name: "Alt",
+    max_players: 60,
+    query_port: 27016,
+    mission: "dayzOffline.chernarusplus",
+    config_json: JSON.stringify(entries),
+  });
+  assert.match(again, /respawnTime = 30;/);
+  assert.match(again, /motd\[\] = \{"Von Hand","Zweite Zeile"\};/);
+  assert.equal(parseCfg("").length, 0);
 });
 
 test("Die Datei enthält die Werte des Panels und die des Kunden", () => {
