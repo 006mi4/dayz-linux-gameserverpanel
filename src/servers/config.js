@@ -18,38 +18,124 @@ import { serverDir } from "../store/servers.js";
  *   Verweis legt das Startskript an.
  */
 
-function quoteCfg(value) {
-  // serverDZ.cfg kennt keine Maskierung innerhalb von Zeichenketten; was
-  // stoeren koennte, wird entfernt statt maskiert.
-  return String(value).replace(/["\r\n]/g, "").slice(0, 100);
+/* --------------------------------------------------------- serverDZ.cfg */
+
+/**
+ * Die Konfiguration eines Servers ist eine geordnete Liste von Paaren, und sie
+ * steht in der Datenbank, nicht in der Datei: Das Panel schreibt serverDZ.cfg
+ * bei jeder Installation und jedem Update neu, eine Aenderung von Hand waere
+ * also spaetestens beim naechsten DayZ-Update verschwunden.
+ *
+ * Vier Werte gehoeren dem Panel und stehen deshalb nicht in dieser Liste —
+ * es braucht sie auch anderswo (Anmeldung bei DZPage, Portpruefung, Anzeige):
+ * hostname, maxPlayers, steamQueryPort und die Mission.
+ */
+export const MANAGED_KEYS = new Set(["hostname", "maxPlayers", "steamQueryPort", "template"]);
+
+/** Schluessel wie in der DayZ-Dokumentation; `motd[]` ist die Ausnahme mit Klammern. */
+export const CFG_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,39}(\[\])?$/;
+
+const MAX_VALUE_LENGTH = 200;
+
+/**
+ * Der Auslieferungszustand. Er haengt am Server, weil die Warteschlange sich
+ * nach der Spielerzahl richtet — alles andere sind die Werte, mit denen ein
+ * DayZ-Server ueblicherweise startet.
+ */
+export function defaultConfig(server = {}) {
+  const maxPlayers = Number(server.max_players) || 60;
+  return [
+    ["password", ""],
+    ["passwordAdmin", ""],
+    ["verifySignatures", "2"],
+    ["forceSameBuild", "1"],
+    ["disableVoN", "0"],
+    ["disable3rdPerson", "0"],
+    ["serverTime", "SystemTime"],
+    ["serverTimeAcceleration", "1"],
+    ["serverTimePersistent", "0"],
+    ["loginQueueConcurrentPlayers", "5"],
+    ["loginQueueMaxPlayers", String(Math.max(maxPlayers, 50))],
+    ["respawnTime", "5"],
+    ["timeStampFormat", "Full"],
+    ["instanceId", "1"],
+    ["storageAutoFix", "1"],
+  ];
+}
+
+export function cleanCfgValue(value) {
+  // Ein Eintrag ist eine Zeile. Zeilenumbrueche wuerden die Datei zerlegen,
+  // deshalb werden sie zu Leerzeichen.
+  return String(value ?? "")
+    .replace(/[\r\n]+/g, " ")
+    .slice(0, MAX_VALUE_LENGTH)
+    .trim();
+}
+
+/**
+ * Wie der Wert hinter dem Gleichheitszeichen aussieht.
+ *
+ * Die Regel ist absichtlich klein und vorhersagbar: Zahlen bleiben nackt,
+ * alles andere bekommt Anfuehrungszeichen — es sei denn, es steht schon in
+ * Konfigurationsschreibweise. Damit ist auch `motd[] = {"a","b"};` moeglich,
+ * ohne dass jemand eine zweite Syntax lernen muss. Was am Ende in der Datei
+ * steht, zeigt die Vorschau im Panel.
+ */
+export function formatCfgValue(value) {
+  const text = cleanCfgValue(value);
+  if (text === "") return '""';
+  if (/^-?\d+(\.\d+)?$/.test(text)) return text;
+  if (text.startsWith("{") || text.startsWith('"')) return text;
+  return `"${text.replace(/"/g, "")}"`;
+}
+
+/** Ein Paar pruefen. Gibt einen Code zurueck, den die Oberflaeche uebersetzt. */
+export function checkCfgEntry(key, value) {
+  const name = String(key ?? "").trim();
+  if (!name) return { ok: false, code: "cfg_key_empty" };
+  if (!CFG_KEY.test(name)) return { ok: false, code: "cfg_key_invalid" };
+  if (MANAGED_KEYS.has(name)) return { ok: false, code: "cfg_key_managed" };
+  return { ok: true, value: [name, cleanCfgValue(value)] };
+}
+
+/**
+ * Die gespeicherte Konfiguration eines Servers. Fehlt sie oder ist sie
+ * unbrauchbar, gilt der Auslieferungszustand — eine leere Liste dagegen ist
+ * eine Ansage und bleibt leer.
+ */
+export function serverConfig(server) {
+  const raw = server?.config_json;
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((entry) => Array.isArray(entry) && checkCfgEntry(entry[0], entry[1]).ok)
+          .map(([key, value]) => [String(key).trim(), cleanCfgValue(value)]);
+      }
+    } catch {
+      // Kaputtes JSON darf keinen Server unstartbar machen.
+    }
+  }
+  return defaultConfig(server);
 }
 
 export function serverDzCfg(server) {
-  return `// Von dzpage-panel erzeugt. Aenderungen bleiben erhalten, solange das
-// Panel die Datei nicht neu schreibt (Ports, Name, Spielerzahl, Mission).
-hostname = "${quoteCfg(server.name)}";
-password = "";
-passwordAdmin = "";
+  const lines = serverConfig(server).map(([key, value]) => `${key} = ${formatCfgValue(value)};`);
+  // Der Kopf ist englisch, anders als die Kommentare hier: Diese Datei liegt
+  // beim Kunden auf der Platte, und das Panel steht auf Rechnern in aller Welt.
+  return `// Written by dzpage-panel. Edit these values in the panel under
+// "Game servers -> Configuration" — changes made directly to this file are
+// lost the next time the panel writes it.
+hostname = ${formatCfgValue(server.name)};
 maxPlayers = ${Number(server.max_players)};
-verifySignatures = 2;
-forceSameBuild = 1;
-disableVoN = 0;
-disable3rdPerson = 0;
-serverTime = "SystemTime";
-serverTimeAcceleration = 1;
-serverTimePersistent = 0;
-loginQueueConcurrentPlayers = 5;
-loginQueueMaxPlayers = ${Math.max(Number(server.max_players), 50)};
-respawnTime = 5;
-timeStampFormat = "Full";
-instanceId = 1;
-storageAutoFix = 1;
 steamQueryPort = ${Number(server.query_port)};
+${lines.join("\n")}
 class Missions
 {
     class DayZ
     {
-        template = "${quoteCfg(server.mission)}";
+        template = ${formatCfgValue(server.mission)};
     };
 };
 `;

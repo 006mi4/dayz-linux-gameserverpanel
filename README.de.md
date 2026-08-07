@@ -168,6 +168,44 @@ Im systemd-Weg läuft **jeder Server unter einem eigenen Benutzer**
 CPU-Grenzen. Er kann weder die Konfiguration des Panels lesen noch die Dateien
 der Nachbarn.
 
+### serverDZ.cfg bearbeiten
+
+**Spielserver → dein Server → Konfiguration** bearbeitet die Serverkonfiguration,
+und das ist auch der einzige Ort, an dem man sie bearbeiten sollte: Das Panel
+schreibt `serverDZ.cfg` bei jeder Installation und jedem DayZ-Update neu, eine
+Änderung auf der Platte wäre spätestens beim nächsten Update weg. Die Werte
+stehen deshalb in der Datenbank des Panels, und die Datei entsteht daraus.
+
+Die Seite hat drei Teile:
+
+- **Grundwerte** — Name, Spielerzahl und Mission. Sie haben eigene Felder, weil
+  das Panel sie auch anderswo braucht (Übersicht, Anmeldung bei DZPage). Wird
+  ein angemeldeter Server umbenannt, zieht der Name bei DZPage mit.
+- **serverDZ.cfg** — alle übrigen Werte als Liste aus Schlüssel und Wert. Wert
+  ändern, „Entfernen" ankreuzen, oder in der letzten Zeile einen neuen Schlüssel
+  samt Wert eintragen — auch einen, den dieses Panel nicht kennt. Alles, was
+  DayZ versteht, geht hier; `verifySignatures`, `disable3rdPerson`,
+  `serverTimeAcceleration` und die anderen sind mit den Werten vorbelegt, mit
+  denen ein frischer Server startet.
+- **Vorschau** — genau die Datei, die das Panel schreiben wird.
+
+Geschrieben wird so, wie man es erwartet: Zahlen nackt, alles andere in
+Anführungszeichen. Ein Wert, der schon mit `{` oder `"` beginnt, wird unverändert
+übernommen — so gehen Listen:
+
+```
+motd[]   = {"Willkommen","Regeln lesen"}
+respawnTime = 5
+serverTime  = SystemTime
+```
+
+Ports lassen sich hier nicht ändern. Sie hängen an der Anmeldung bei DZPage, an
+BattlEye und an der Portprüfung gegen die anderen Server dieses Panels — ein
+Port ist keine Einstellung, sondern die Identität des Servers.
+
+Änderungen werden sofort geschrieben, wirken aber erst beim nächsten Neustart
+des Servers; DayZ liest die Datei genau einmal, beim Start.
+
 ### Laufzeit: systemd oder Docker
 
 Standard ist systemd. Docker ist eine Umschaltung im Panel, kein zweiter

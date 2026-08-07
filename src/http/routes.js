@@ -4,6 +4,7 @@ import * as dashboard from "../routes/dashboard.js";
 import * as steam from "../routes/steam.js";
 import * as dzpage from "../routes/dzpage.js";
 import * as servers from "../routes/servers.js";
+import * as serverconfig from "../routes/serverconfig.js";
 import * as updates from "../routes/updates.js";
 
 /**
@@ -41,6 +42,7 @@ export const ROUTES = [
   { path: "/servers/new", methods: ["GET", "POST"], access: "user", handler: servers.create },
   { path: "/server", methods: ["GET"], access: "user", handler: servers.detail },
   { path: "/server/action", methods: ["POST"], access: "user", handler: servers.act },
+  { path: "/server/config", methods: ["GET", "POST"], access: "user", handler: serverconfig.route },
   { path: "/job", methods: ["GET"], access: "user", handler: servers.jobPage },
 
   // Update-Pruefung: Zeitplan fuer alle, Verhalten je Server.

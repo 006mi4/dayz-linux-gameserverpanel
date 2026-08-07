@@ -269,6 +269,33 @@ export const en = {
   "updates.tile.automaticSub": "servers update themselves",
   "updates.err.check": "The last check failed: {message}",
 
+  "cfg.title": "Configuration",
+  "cfg.lede": "serverDZ.cfg for {name}. The panel writes this file — edit it here, not on disk.",
+  "cfg.basics.heading": "Basics",
+  "cfg.basics.sub": "the panel needs these elsewhere too, so they have their own fields",
+  "cfg.portsFixed":
+    "Ports cannot be changed here. They are tied to the DZPage registration, to BattlEye and to the other servers on this panel — a port is not a setting, it is the identity of the server.",
+  "cfg.entries.heading": "serverDZ.cfg",
+  "cfg.entries.sub": "every other value — change it, remove it, or add one the panel does not know",
+  "cfg.key": "Key",
+  "cfg.value": "Value",
+  "cfg.remove": "Remove",
+  "cfg.newKey": "new key",
+  "cfg.newValue": "value",
+  "cfg.entriesHint":
+    "Numbers are written as they are, everything else is quoted. A value that already starts with { or \" is taken verbatim — that is how motd[] = {\"line 1\",\"line 2\"} works. The preview below shows exactly what will be written.",
+  "cfg.defaults": "Back to defaults",
+  "cfg.preview.heading": "Preview",
+  "cfg.preview.sub": "what the panel writes to serverDZ.cfg",
+  "cfg.saved": "Saved.",
+  "cfg.savedRestart": "Saved. The server picks the file up on its next restart.",
+  "cfg.dzpageStale": "The name on DZPage could not be updated — register the server again there.",
+  "cfg.err.cfg_key_empty": "A value needs a key.",
+  "cfg.err.cfg_key_invalid":
+    "“{key}” is not a valid key: letters, digits and underscore, optionally ending in [].",
+  "cfg.err.cfg_key_managed": "“{key}” is set by the panel above, not in this list.",
+  "cfg.err.cfg_key_twice": "“{key}” appears twice — DayZ would then decide which line counts.",
+
   "panel.heading": "This panel",
   "panel.sub": "the panel software itself, updated from Git",
   "panel.installed": "Installed",

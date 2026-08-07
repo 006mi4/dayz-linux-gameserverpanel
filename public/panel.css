@@ -487,6 +487,12 @@ a.srv:hover { border-color: var(--line-2); background: var(--surface-3); color: 
 
 .table-wrap { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
 
+/* Konfigurationstabelle: zwei Eingabespalten und eine schmale zum Abhaken. */
+.cfg td { padding-right: 10px; }
+.cfg td input[type="text"] { padding: 7px 9px; font-family: var(--mono); font-size: 13px; }
+.cfg th.mid, .cfg td.mid { width: 1%; padding-right: 0; text-align: center; white-space: nowrap; }
+.cfg td:first-child { width: 38%; }
+
 .data { width: 100%; border-collapse: collapse; font-size: 14px; }
 .data th {
   padding: 0 12px 9px 0;

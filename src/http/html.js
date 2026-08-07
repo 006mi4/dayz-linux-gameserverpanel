@@ -62,6 +62,8 @@ const ICONS = {
   check: '<path d="m3.5 8.4 3 3 6-6.6"/>',
   alert: '<path d="M8 2.8 13.7 12.7H2.3z"/><path d="M8 6.4v3M8 11.3h.01"/>',
   clock: '<circle cx="8" cy="8" r="5.6"/><path d="M8 4.7V8l2.2 1.5"/>',
+  // Schieberegler statt Zahnrad: Es geht um Werte, nicht um Maschinerie.
+  sliders: '<path d="M2.5 4.6h4M9.5 4.6h4M2.5 11.4h2M7.5 11.4h6"/><circle cx="8" cy="4.6" r="1.6"/><circle cx="6" cy="11.4" r="1.6"/>',
   cpu: '<rect x="4.5" y="4.5" width="7" height="7" rx="1.5"/><path d="M6.4 1.8v2.7M9.6 1.8v2.7M6.4 11.5v2.7M9.6 11.5v2.7M1.8 6.4h2.7M1.8 9.6h2.7M11.5 6.4h2.7M11.5 9.6h2.7"/>',
   database: '<ellipse cx="8" cy="3.9" rx="5" ry="2.1"/><path d="M3 3.9v8.2c0 1.2 2.2 2.1 5 2.1s5-.9 5-2.1V3.9"/><path d="M13 8c0 1.2-2.2 2.1-5 2.1S3 9.2 3 8"/>',
   terminal: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="m5 6.6 2 1.9-2 1.9"/><path d="M8.6 10.4h3"/>',

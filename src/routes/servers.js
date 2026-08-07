@@ -373,7 +373,12 @@ export async function detail(rc) {
        <div class="actions tight">
          ${action("delete", t("servers.actions.delete"), "danger", { iconName: "trash" })}
        </div>
-     </form>`,
+     </form>
+     <div class="actions tight">
+       <a class="btn secondary" href="/server/config?id=${escapeHtml(server.id)}">${icon("sliders")}${escapeHtml(
+         t("cfg.title"),
+       )}</a>
+     </div>`,
     { title: t("servers.controls") },
   );
 

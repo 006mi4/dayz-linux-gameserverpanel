@@ -272,6 +272,33 @@ export const de = {
   "updates.tile.automaticSub": "Server aktualisieren sich selbst",
   "updates.err.check": "Die letzte Prüfung ist fehlgeschlagen: {message}",
 
+  "cfg.title": "Konfiguration",
+  "cfg.lede": "serverDZ.cfg für {name}. Das Panel schreibt diese Datei — bearbeitet wird sie hier, nicht auf der Platte.",
+  "cfg.basics.heading": "Grundwerte",
+  "cfg.basics.sub": "die braucht das Panel auch anderswo, deshalb haben sie eigene Felder",
+  "cfg.portsFixed":
+    "Ports lassen sich hier nicht ändern. Sie hängen an der Anmeldung bei DZPage, an BattlEye und an den anderen Servern dieses Panels — ein Port ist keine Einstellung, sondern die Identität des Servers.",
+  "cfg.entries.heading": "serverDZ.cfg",
+  "cfg.entries.sub": "alle übrigen Werte — ändern, entfernen oder einen hinzufügen, den das Panel nicht kennt",
+  "cfg.key": "Schlüssel",
+  "cfg.value": "Wert",
+  "cfg.remove": "Entfernen",
+  "cfg.newKey": "neuer Schlüssel",
+  "cfg.newValue": "Wert",
+  "cfg.entriesHint":
+    "Zahlen werden so geschrieben, wie sie dastehen, alles andere in Anführungszeichen. Ein Wert, der mit { oder \" beginnt, wird unverändert übernommen — so geht motd[] = {\"Zeile 1\",\"Zeile 2\"}. Die Vorschau unten zeigt genau das, was geschrieben wird.",
+  "cfg.defaults": "Auslieferungszustand",
+  "cfg.preview.heading": "Vorschau",
+  "cfg.preview.sub": "was das Panel in serverDZ.cfg schreibt",
+  "cfg.saved": "Gespeichert.",
+  "cfg.savedRestart": "Gespeichert. Der Server übernimmt die Datei beim nächsten Neustart.",
+  "cfg.dzpageStale": "Der Name bei DZPage ließ sich nicht nachziehen — den Server dort erneut anmelden.",
+  "cfg.err.cfg_key_empty": "Zu einem Wert gehört ein Schlüssel.",
+  "cfg.err.cfg_key_invalid":
+    "„{key}“ ist kein gültiger Schlüssel: Buchstaben, Ziffern und Unterstrich, wahlweise mit [] am Ende.",
+  "cfg.err.cfg_key_managed": "„{key}“ setzt das Panel oben, nicht diese Liste.",
+  "cfg.err.cfg_key_twice": "„{key}“ steht zweimal — dann entscheidet DayZ, welche Zeile gilt.",
+
   "panel.heading": "Dieses Panel",
   "panel.sub": "das Panel selbst, aktualisiert über Git",
   "panel.installed": "Installiert",

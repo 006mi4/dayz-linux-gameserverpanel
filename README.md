@@ -183,6 +183,43 @@ In the systemd install **every server runs as its own user** (`dzsrv_<id>`), in
 its own directory, with its own memory and CPU limits. It can read neither the
 panel’s configuration nor its neighbours’ files.
 
+### Editing serverDZ.cfg
+
+**Game servers → your server → Configuration** edits the server config, and it
+is the only place you should edit it: the panel rewrites `serverDZ.cfg` on every
+install and every DayZ update, so a change made on disk would be gone by the
+next update. The values live in the panel’s database instead, and the file is
+generated from them.
+
+The page has three parts:
+
+- **Basics** — name, player count and mission. These have their own fields
+  because the panel needs them elsewhere too (the server list, the registration
+  on DZPage). Renaming a registered server updates its name on DZPage as well.
+- **serverDZ.cfg** — every other value as a list of key and value. Change one,
+  tick “remove” to drop one, or type a new key and value in the last row to add
+  a setting the panel does not know. Anything DayZ accepts works here;
+  `verifySignatures`, `disable3rdPerson`, `serverTimeAcceleration` and friends
+  are pre-filled with the values a fresh server ships with.
+- **Preview** — the exact file the panel will write.
+
+Values are written the way you would expect: numbers bare, everything else in
+quotes. A value that already starts with `{` or `"` is taken verbatim, which is
+how list settings work:
+
+```
+motd[]   = {"Welcome","Read the rules"}
+respawnTime = 5
+serverTime  = SystemTime
+```
+
+Ports are not editable here. They are tied to the DZPage registration, to
+BattlEye and to the port check against the other servers on this panel — a port
+is not a setting, it is the identity of the server.
+
+Changes are written immediately but only take effect when the server restarts;
+DayZ reads the file once at start.
+
 ### Runtime: systemd or Docker
 
 systemd is the default. Docker is a switch inside the panel, not a second

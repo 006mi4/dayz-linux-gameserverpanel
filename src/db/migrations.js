@@ -143,6 +143,19 @@ export const MIGRATIONS = [
       `ALTER TABLE servers ADD COLUMN installed_build VARCHAR(20)`,
     ],
   },
+  {
+    id: 4,
+    name: "server-konfiguration",
+    // Die Eintraege der serverDZ.cfg, die der Kunde selbst bestimmt: als JSON
+    // und als Liste von Paaren, damit die Reihenfolge erhalten bleibt und ein
+    // neuer Schluessel keine Wanderung braucht.
+    //
+    // Sie stehen hier und nicht in der Datei, weil das Panel die Datei bei
+    // jeder Installation neu schreibt — eine Aenderung von Hand waere beim
+    // naechsten Update weg.
+    sqlite: [`ALTER TABLE servers ADD COLUMN config_json TEXT`],
+    mysql: [`ALTER TABLE servers ADD COLUMN config_json TEXT`],
+  },
 ];
 
 const VERSION_TABLE = {
