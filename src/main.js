@@ -8,6 +8,7 @@ import { createThrottle } from "./auth/throttle.js";
 import { createHeartbeat } from "./dzpage/heartbeat.js";
 import { createPoller } from "./dzpage/poller.js";
 import { createUpdateWatcher } from "./servers/updates.js";
+import { announceSelfUpdateResult, createPanelUpdateWatcher, markBootSuccessful } from "./panel/updates.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
 import { trimEvents } from "./store/events.js";
 import { DATA_DIR } from "./paths.js";
@@ -38,10 +39,14 @@ export async function startPanel({ port, bind } = {}) {
   app.heartbeat = createHeartbeat(app);
   app.poller = createPoller(app);
   app.updateWatcher = createUpdateWatcher(app);
+  app.panelUpdateWatcher = createPanelUpdateWatcher(app);
 
   if (db) {
     await purgeExpiredSessions(db).catch((err) => log.warn(`Sitzungen aufräumen: ${err.message}`));
     await trimEvents(db).catch((err) => log.warn(`Ereignisse aufräumen: ${err.message}`));
+    // Kommen wir gerade aus einer Selbstaktualisierung? Dann steht das Ergebnis
+    // in einer Datei — im Arbeitsspeicher hat es den Neustart nicht ueberlebt.
+    await announceSelfUpdateResult(app).catch((err) => log.warn(`Ergebnis der Aktualisierung: ${err.message}`));
   }
 
   const server = createHttpServer(app);
@@ -64,6 +69,12 @@ export async function startPanel({ port, bind } = {}) {
   app.heartbeat.start();
   app.poller.start();
   app.updateWatcher.start();
+  app.panelUpdateWatcher.start();
+
+  // Wir stehen: Damit gilt der laufende Stand als brauchbar. Im Container ist
+  // das die Marke, auf die der Einstieg zurueckfaellt, wenn eine neue Fassung
+  // nicht hochkommt.
+  await markBootSuccessful();
 
   return {
     app,
@@ -74,6 +85,7 @@ export async function startPanel({ port, bind } = {}) {
       app.heartbeat.stop();
       app.poller.stop();
       app.updateWatcher.stop();
+      app.panelUpdateWatcher.stop();
       await new Promise((resolve) => server.close(resolve));
       await app.db?.close().catch(() => undefined);
     },

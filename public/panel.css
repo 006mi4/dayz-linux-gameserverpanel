@@ -482,6 +482,8 @@ a.srv:hover { border-color: var(--line-2); background: var(--surface-3); color: 
 .status th, .status td { padding: 9px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .status th { width: 44%; color: var(--muted); font-weight: 500; }
 .status tr:last-child th, .status tr:last-child td { border-bottom: 0; }
+/* Steht unter der Tabelle noch ein Formularfeld, braucht es Luft dazwischen. */
+.status + .field { margin-top: 16px; }
 
 .table-wrap { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
 

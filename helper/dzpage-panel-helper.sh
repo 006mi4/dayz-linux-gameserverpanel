@@ -15,11 +15,13 @@
 #   status <id>                              maschinenlesbare Zustandszeilen
 #   logs <id> <zeilen>
 #   destroy <id>                             Dienst weg, Benutzer weg
+#   self-update <vX.Y.Z>                     neue Panel-Fassung ausrollen
 #
 set -euo pipefail
 
 DATA_DIR=/var/lib/dzpage-panel
 SERVERS_DIR=$DATA_DIR/servers
+APP_DIR=/usr/lib/dzpage-panel
 PANEL_USER=dzpage
 UNIT_PREFIX=dzpage-server
 DROPIN_ROOT=/etc/systemd/system
@@ -137,6 +139,21 @@ cmd_logs() {
   journalctl -u "$unit" -n "$lines" --no-pager --output=short-iso 2>/dev/null || true
 }
 
+# Die neue Panel-Fassung rollt ein eigener Dienst aus, nicht dieser Aufruf:
+# Dabei startet das Panel neu, und ein Prozess, der am Socket des Panels haengt,
+# koennte danach nichts mehr melden. systemd-run bricht ausserdem ab, wenn schon
+# eine Aktualisierung laeuft — zwei gleichzeitig waeren ein zerlegtes Panel.
+cmd_self_update() {
+  local version=${1:-}
+  [[ "$version" =~ ^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]] || die "ungueltige Fassung: $version"
+  [ -x "$APP_DIR/self-update.sh" ] || die "Selbstaktualisierung ist hier nicht eingerichtet"
+  systemd-run --collect --quiet --unit=dzpage-panel-selfupdate \
+    --description="DZPage Panel Selbstaktualisierung $version" \
+    "$APP_DIR/self-update.sh" "$version" \
+    || die "Aktualisierung laeuft bereits oder liess sich nicht starten"
+  echo "self-update $version gestartet"
+}
+
 [ "$(id -u)" -eq 0 ] || die "muss als root laufen"
 
 dispatch() {
@@ -148,6 +165,7 @@ dispatch() {
     start|stop|restart|enable|disable) cmd_simple "$action" "$@" ;;
     status) cmd_status "$@" ;;
     logs) cmd_logs "$@" ;;
+    self-update) cmd_self_update "$@" ;;
     *) die "unbekannte Operation: ${action:-(keine)}" ;;
   esac
 }
@@ -159,6 +177,10 @@ dispatch() {
 # PrivateDevices oder ProtectKernelTunables setzen implizit NoNewPrivileges —
 # damit kann sudo keine Rechte mehr erhoehen. Statt die Haertung aufzuweichen,
 # kommt die Anfrage ueber einen Socket, den nur der Dienstbenutzer oeffnen darf.
+#
+# Der Punkt gehoert seit "self-update v0.3.0" zu den erlaubten Zeichen. Er ist
+# ungefaehrlich, weil keine Operation einen Pfad entgegennimmt: Kennungen sind
+# zwoelf Hex-Stellen, Zahlen sind Zahlen, Fassungen haben ihr eigenes Muster.
 if [ "${1:-}" = "--stdin" ]; then
   IFS= read -r line || line=""
   case "$line" in
@@ -167,7 +189,7 @@ if [ "${1:-}" = "--stdin" ]; then
       printf '#status:64\n'
       exit 0
       ;;
-    *[!A-Za-z0-9\ _-]*)
+    *[!A-Za-z0-9\ ._-]*)
       echo "helper: unerlaubte Zeichen in der Anfrage" >&2
       printf '#status:64\n'
       exit 0

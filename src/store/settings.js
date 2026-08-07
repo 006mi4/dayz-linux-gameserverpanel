@@ -24,6 +24,16 @@ export const KEYS = {
   updateAvailableBuild: "update_available_build",
   updatePublishedAt: "update_published_at",
   updateLastError: "update_last_error",
+
+  /** Aktualisierung des Panels selbst (Git/GitHub, nicht Steam). */
+  panelUpdateMode: "panel_update_mode",
+  panelUpdateCheckedAt: "panel_update_checked_at",
+  panelUpdateLatest: "panel_update_latest",
+  panelUpdateError: "panel_update_error",
+  /** Fassung, zu der schon ein Ereignis im Protokoll steht. */
+  panelUpdateAnnounced: "panel_update_announced",
+  /** Zeitstempel des Ergebnisses, das nach dem Neustart schon gemeldet wurde. */
+  panelUpdateResultAt: "panel_update_result_at",
 };
 
 export async function getSetting(db, name) {

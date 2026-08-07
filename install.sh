@@ -19,6 +19,8 @@ UNIT=/etc/systemd/system/dzpage-panel.service
 NODE_MAJOR_MIN=22
 SOURCE_DIR=$(cd "$(dirname "$0")" && pwd)
 
+ORIGINAL_ARGS=("$@")
+
 WITH_STEAM_DEPS=1
 WITH_NODE_INSTALL=1
 WITH_DOCKER=0
@@ -40,6 +42,12 @@ die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 [ -d /run/systemd/system ] || die "Dieses System benutzt kein systemd."
 [ -f "$SOURCE_DIR/bin/dzpage-panel.js" ] || die "install.sh muss im entpackten Panel-Verzeichnis liegen."
 
+# Aus einem Git-Arbeitsverzeichnis installiert? Dann kann sich das Panel spaeter
+# selbst aktualisieren — und nur dann. Wer die Dateien von Hand kopiert hat,
+# bekommt kein Programm, das ihm ungefragt darin herumschreibt.
+SOURCE_IS_GIT=0
+[ -d "$SOURCE_DIR/.git" ] && SOURCE_IS_GIT=1
+
 # ---------------------------------------------------------------- Pakete
 if command -v apt-get >/dev/null 2>&1; then
   say "Systempakete pruefen"
@@ -50,6 +58,10 @@ if command -v apt-get >/dev/null 2>&1; then
   for pkg in util-linux tar ca-certificates curl; do
     dpkg -s "$pkg" >/dev/null 2>&1 || MISSING="$MISSING $pkg"
   done
+  # git nur, wenn es auch gebraucht wird: es ist der Kanal fuer Aktualisierungen.
+  if [ "$SOURCE_IS_GIT" -eq 1 ]; then
+    dpkg -s git >/dev/null 2>&1 || MISSING="$MISSING git"
+  fi
   if [ "$WITH_STEAM_DEPS" -eq 1 ]; then
     # SteamCMD ist 32-Bit, auch auf 64-Bit-Systemen.
     dpkg --print-foreign-architectures | grep -qx i386 || {
@@ -172,6 +184,62 @@ for unit in dzpage-server@.service dzpage-panel-helper.socket dzpage-panel-helpe
   install -m 0644 -o root -g root "$SOURCE_DIR/systemd/$unit" "/etc/systemd/system/$unit"
 done
 
+# ---------------------------------------------------------------- Herkunft
+say "Herkunft und Selbstaktualisierung"
+INSTALL_METHOD=manual
+CHECKOUT=""
+REPOSITORY=""
+if [ "$SOURCE_IS_GIT" -eq 1 ] && command -v git >/dev/null 2>&1; then
+  # Gehoert das Arbeitsverzeichnis einem anderen Benutzer, verweigert Git seit
+  # 2.35 als root die Arbeit ("dubious ownership"). Das trifft jeden, der als
+  # normaler Benutzer klont und dann mit sudo installiert.
+  #
+  # --system und nicht --global: Die Aktualisierung laeuft spaeter als eigener
+  # systemd-Dienst, und der hat kein HOME — "git config --global" bricht dort
+  # mit "fatal: $HOME not set" ab. /etc/gitconfig braucht keins.
+  git config --system --get-all safe.directory 2>/dev/null | grep -qxF "$SOURCE_DIR" \
+    || git config --system --add safe.directory "$SOURCE_DIR"
+  INSTALL_METHOD=git
+  CHECKOUT=$SOURCE_DIR
+  REPOSITORY=$(git -C "$SOURCE_DIR" remote get-url origin 2>/dev/null || true)
+fi
+
+if [ "$INSTALL_METHOD" = "git" ]; then
+  # Die beiden Platzhalter stehen erst hier fest: welches Arbeitsverzeichnis
+  # gemeint ist und mit welchen Optionen die naechste Fassung ausgerollt wird.
+  # Ohne die Optionen wuerde eine Aktualisierung Dinge tun, die bei der
+  # Erstinstallation ausdruecklich abgewaehlt waren.
+  # In der Ersetzung von sed sind \, & und das Trennzeichen besonders — ein Pfad
+  # mit einem davon wuerde sonst still etwas anderes ergeben.
+  sed_escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+  sed -e "s|@CHECKOUT@|$(sed_escape "$CHECKOUT")|" \
+      -e "s|@INSTALL_ARGS@|$(sed_escape "${ORIGINAL_ARGS[*]:-}")|" \
+    "$SOURCE_DIR/helper/self-update.sh" > "$APP_DIR/self-update.sh"
+  chown root:root "$APP_DIR/self-update.sh"
+  chmod 0755 "$APP_DIR/self-update.sh"
+  note "Aktualisierung ueber $REPOSITORY"
+else
+  rm -f "$APP_DIR/self-update.sh"
+  note "Von Hand installiert — das Panel meldet Aktualisierungen, spielt sie aber nicht ein."
+fi
+
+ARGS_JSON=""
+for arg in ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}; do
+  ARGS_JSON="${ARGS_JSON:+$ARGS_JSON, }\"$arg\""
+done
+cat > "$CONFIG_DIR/install.json" <<EOF
+{
+  "method": "$INSTALL_METHOD",
+  "checkout": "$CHECKOUT",
+  "repository": "$REPOSITORY",
+  "args": [$ARGS_JSON],
+  "installedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+# Gehoert root: Das Panel liest die Datei, aendern darf es sie nicht.
+chown root:root "$CONFIG_DIR/install.json"
+chmod 0644 "$CONFIG_DIR/install.json"
+
 say "Privilegierter Helfer"
 # Kein sudo: Die Unit des Panels ist gehaertet, und Optionen wie PrivateDevices
 # setzen implizit NoNewPrivileges — sudo koennte dann gar nichts mehr erhoehen.
@@ -211,5 +279,8 @@ say "Fertig"
 note "Oberflaeche: http://127.0.0.1:$PORT"
 note "Von aussen erreichbar nur ueber einen Reverse-Proxy mit TLS (siehe README)."
 note "Protokoll:   journalctl -u dzpage-panel -f"
+if [ "$INSTALL_METHOD" = "git" ]; then
+  note "Aktualisierung: das Panel sieht selbst nach neuen Fassungen (unter 'Aktualisierungen' einstellbar)."
+fi
 printf '\n  Vor dem Assistenten auf dzpage.com unter /rcon einen Panel-Schluessel\n'
 printf '  erstellen — der Assistent fragt im vierten Schritt danach.\n\n'

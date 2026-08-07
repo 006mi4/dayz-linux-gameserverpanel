@@ -27,3 +27,16 @@ export const STEAM_INFO_HOME = join(DATA_DIR, "steam-info-home");
 
 /** Standardablage der SQLite-Datenbank. */
 export const SQLITE_FILE = join(DATA_DIR, "panel.sqlite");
+
+/**
+ * Wie dieses Panel installiert wurde (install.sh oder Docker-Einstieg legen die
+ * Datei an). Ohne sie kann sich das Panel nicht selbst aktualisieren.
+ */
+export const INSTALL_FILE = join(CONFIG_DIR, "install.json");
+
+/**
+ * Ergebnis der letzten Selbstaktualisierung. Sie laeuft als eigener Prozess
+ * weiter, waehrend das Panel neu startet — eine Datei ist der einzige Weg, auf
+ * dem das Ergebnis den Neustart ueberlebt.
+ */
+export const SELF_UPDATE_FILE = join(DATA_DIR, "self-update.json");

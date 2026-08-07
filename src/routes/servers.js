@@ -15,6 +15,7 @@ import {
 import { getSetting, getSettings, KEYS } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
 import { runtimeFor, RUNTIME_IDS } from "../runtime/index.js";
+import { availableRuntimes } from "../panel/installation.js";
 import { provisionServer } from "../servers/install.js";
 import { installedBuildId } from "../servers/updates.js";
 import { writeServerFiles } from "../servers/config.js";
@@ -352,12 +353,18 @@ export async function detail(rc) {
          })}
        </div>
        <div class="actions tight">
-         ${action(
-           server.runtime === "docker" ? "runtime-systemd" : "runtime-docker",
-           t("servers.actions.switchRuntime", { runtime: server.runtime === "docker" ? "systemd" : "Docker" }),
-           "secondary",
-           { iconName: "cpu" },
-         )}
+         ${
+           availableRuntimes().length > 1
+             ? action(
+                 server.runtime === "docker" ? "runtime-systemd" : "runtime-docker",
+                 t("servers.actions.switchRuntime", {
+                   runtime: server.runtime === "docker" ? "systemd" : "Docker",
+                 }),
+                 "secondary",
+                 { iconName: "cpu" },
+               )
+             : ""
+         }
          ${action("register", t("servers.actions.register"), "secondary", {
            disabled: Boolean(server.dzpage_server_id),
            iconName: "link",
@@ -507,6 +514,9 @@ function renderDeleteConfirm(rc, server) {
  */
 async function switchRuntime(rc, server, target) {
   if (!RUNTIME_IDS.includes(target)) throw new Error("Unbekannte Laufzeit.");
+  // Im Container gibt es kein systemd, in das ein Spielserver gestartet werden
+  // koennte — der Wechsel dorthin wuerde einen laufenden Server stilllegen.
+  if (!availableRuntimes().includes(target)) throw new Error(`Laufzeit ${target} steht hier nicht zur Verfügung.`);
   const current = runtimeFor(server);
   const next = runtimeFor(target);
 

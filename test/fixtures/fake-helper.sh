@@ -54,6 +54,12 @@ case "$ACTION" in
   logs)
     printf '2026-08-07T00:00:00+0000 dzpage-server-%s[4242]: DayZ server ready\n' "$ID"
     ;;
+  self-update)
+    # Im Betrieb startet der Helfer hier einen eigenen Dienst, der die Dateien
+    # austauscht und das Panel neu startet. Im Test bleibt der Aufruf in
+    # calls.log stehen — mehr soll er auch nicht.
+    echo "self-update $ID gestartet"
+    ;;
   *)
     echo "unbekannte Operation: $ACTION" >&2
     exit 64

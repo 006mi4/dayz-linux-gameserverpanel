@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { SERVERS_DIR } from "../paths.js";
+import { defaultRuntime } from "../panel/installation.js";
 import { decryptSecret, encryptSecret } from "../crypto/secretbox.js";
 
 /**
@@ -111,7 +112,7 @@ export async function createServer(db, input, encryptionKey) {
     `INSERT INTO servers
        (id, name, game_port, query_port, rcon_port, rcon_password_enc, max_players, mission,
         runtime, memory_max_mb, cpu_quota, install_state, autostart, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'systemd', ?, ?, 'new', 1, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 1, ?)`,
     [
       id,
       input.name,
@@ -121,6 +122,9 @@ export async function createServer(db, input, encryptionKey) {
       encryptSecret(input.password, encryptionKey),
       input.maxPlayers,
       input.mission,
+      // Laeuft das Panel im Container, ist Docker die einzige Laufzeit, die es
+      // erreichen kann — systemd gibt es dort nicht.
+      defaultRuntime(),
       input.memoryMaxMb,
       input.cpuQuota,
       now,

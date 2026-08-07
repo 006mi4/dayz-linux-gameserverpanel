@@ -9,6 +9,15 @@ import {
   startUpdateCheck,
 } from "../servers/updates.js";
 import {
+  applyPanelUpdate,
+  checkPanelUpdate,
+  compareVersions,
+  DEFAULT_PANEL_UPDATE_MODE,
+  PANEL_UPDATE_MODES,
+  readPanelUpdateState,
+} from "../panel/updates.js";
+import { canSelfUpdate, repositoryUrl } from "../panel/installation.js";
+import {
   card,
   csrfInput,
   escapeHtml,
@@ -68,6 +77,100 @@ function intervalSelect(t, minutes) {
   return `<select class="sm" name="interval" id="f_interval">${options}</select>`;
 }
 
+/* ------------------------------------------------------------ Das Panel selbst */
+
+function panelModeSelect(t, mode) {
+  const options = PANEL_UPDATE_MODES.map(
+    (choice) =>
+      `<option value="${choice}"${choice === mode ? " selected" : ""}>${escapeHtml(
+        t(`panel.mode.${choice}`),
+      )}</option>`,
+  ).join("");
+  return `<select class="sm" name="panelMode" id="f_panel_mode">${options}</select>`;
+}
+
+/**
+ * Die Karte fuer das Panel selbst. Sie steht ueber den Spielservern, weil sie
+ * die naheliegendere Frage beantwortet: "Bin ich selbst aktuell?" — und weil
+ * eine Aktualisierung des Panels der einzige Vorgang auf dieser Seite ist, der
+ * die Oberflaeche kurz verschwinden laesst.
+ */
+function panelCard(t, state, csrf) {
+  const kind = state.newer ? "warn" : state.latest ? "ok" : "off";
+  const stateText = state.newer
+    ? t("panel.state.outdated")
+    : state.latest
+      ? t("panel.state.current")
+      : t("panel.state.unchecked");
+
+  const source = repositoryUrl(state.installation);
+  const rows = [
+    [t("panel.installed"), `<span class="mono">${escapeHtml(state.current)}</span>`],
+    [
+      t("panel.latest"),
+      `<span class="mono">${escapeHtml(state.latest || "—")}</span> ${state.error ? "" : pill(kind, stateText)}`,
+    ],
+    [
+      t("panel.checked"),
+      escapeHtml(
+        state.checkedAt ? t("time.ago", { value: relativeTime(t, state.checkedAt) }) : t("common.never"),
+      ),
+    ],
+    [
+      t("panel.source"),
+      source
+        ? `<a href="${escapeHtml(source)}" rel="noreferrer noopener external">${escapeHtml(source)}</a>`
+        : escapeHtml(t("panel.source.manual")),
+    ],
+  ];
+
+  // Ein Panel, das von Hand kopiert wurde, darf sich nicht selbst ueberschreiben
+  // — es weiss nicht, was der Mensch dort sonst noch abgelegt hat.
+  const selfUpdating = canSelfUpdate(state.installation);
+  // Ein gescheiterter Versuch bleibt stehen, solange er etwas erklaert: Er sagt,
+  // warum diese Fassung noch laeuft. Ist die betroffene Fassung inzwischen
+  // ueberholt, hat die Meldung ihren Zweck erfuellt.
+  const failed = state.result?.state === "failed" && compareVersions(state.result.to, state.current) > 0;
+  const notices = [
+    state.error ? notice("error", t("panel.err.check", { message: state.error })) : "",
+    failed
+      ? notice("error", t("panel.result.failed", { version: state.result.to, message: state.result.message }))
+      : "",
+    state.newer && !selfUpdating ? notice("warn", t("panel.manual", { version: state.latest })) : "",
+  ].join("");
+
+  return card(
+    `${notices}
+     <form method="post" action="/updates">
+       ${csrfInput(csrf)}
+       <table class="status">${rows
+         .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`)
+         .join("")}</table>
+       <p class="field">
+         <label for="f_panel_mode">${escapeHtml(t("panel.mode.heading"))}</label>
+         ${panelModeSelect(t, state.mode)}
+       </p>
+       <p class="hint">${escapeHtml(t("panel.mode.hint"))}</p>
+       <div class="actions">
+         <button class="btn secondary" type="submit" name="action" value="panel-mode">${escapeHtml(
+           t("common.save"),
+         )}</button>
+         <button class="btn secondary" type="submit" name="action" value="panel-check">${icon(
+           "restart",
+         )}${escapeHtml(t("panel.checkNow"))}</button>
+         ${
+           state.newer && selfUpdating
+             ? `<button class="btn primary" type="submit" name="action" value="panel-install">${icon(
+                 "download",
+               )}${escapeHtml(t("panel.install", { version: state.latest }))}</button>`
+             : ""
+         }
+       </div>
+     </form>`,
+    { title: t("panel.heading"), sub: t("panel.sub") },
+  );
+}
+
 async function readState(rc) {
   const settings = await getSettings(rc.app.db, [
     KEYS.updateCheckEnabled,
@@ -97,6 +200,7 @@ async function readState(rc) {
 export async function page(rc, { message = null, messageKind = "ok" } = {}) {
   const t = rc.t;
   const state = await readState(rc);
+  const panelState = await readPanelUpdateState(rc.app.db);
   const outdated = state.servers.filter((server) => server.state === "outdated");
   const automatic = state.servers.filter((server) => server.update_mode === "auto");
 
@@ -148,6 +252,9 @@ export async function page(rc, { message = null, messageKind = "ok" } = {}) {
          <button class="btn primary" type="submit" name="action" value="schedule">${escapeHtml(
            t("common.save"),
          )}</button>
+         <button class="btn secondary" type="submit" name="action" value="check">${icon(
+           "restart",
+         )}${escapeHtml(t("updates.checkNow"))}</button>
        </div>
      </form>`,
     { title: t("updates.schedule.heading"), sub: t("updates.schedule.sub") },
@@ -200,17 +307,9 @@ export async function page(rc, { message = null, messageKind = "ok" } = {}) {
   rc.page(
     200,
     t("updates.title"),
-    `${pageHead({
-      title: t("updates.title"),
-      lede: t("updates.lede"),
-      actions: `<form method="post" action="/updates" class="inline">
-          ${csrfInput(rc.csrf)}
-          <button class="btn secondary" type="submit" name="action" value="check">${icon(
-            "restart",
-          )}${escapeHtml(t("updates.checkNow"))}</button>
-        </form>`,
-    })}
+    `${pageHead({ title: t("updates.title"), lede: t("updates.lede") })}
      ${message ? notice(messageKind, message) : ""}
+     ${panelCard(t, panelState, rc.csrf)}
      ${state.error ? notice("error", t("updates.err.check", { message: state.error })) : ""}
      <div class="tiles">${tiles}</div>
      ${scheduleCard}
@@ -228,6 +327,57 @@ export async function index(rc) {
 
 export async function save(rc) {
   const action = rc.form.get("action");
+
+  /* --------------------------------------------------- Das Panel selbst */
+
+  if (action === "panel-mode") {
+    const wanted = rc.form.get("panelMode");
+    const mode = PANEL_UPDATE_MODES.includes(wanted) ? wanted : DEFAULT_PANEL_UPDATE_MODE;
+    await setSetting(rc.app.db, KEYS.panelUpdateMode, mode);
+    await recordEvent(rc.app.db, {
+      kind: "panel.update.mode",
+      message: `Verhalten bei neuen Panel-Fassungen: ${mode}`,
+    });
+    await page(rc, { message: rc.t("updates.saved") });
+    return;
+  }
+
+  if (action === "panel-check") {
+    try {
+      const result = await checkPanelUpdate(rc.app);
+      await page(rc, {
+        message: result.newer
+          ? rc.t("panel.found", { version: result.latest })
+          : rc.t("panel.upToDate", { version: result.current }),
+        messageKind: result.newer ? "warn" : "ok",
+      });
+    } catch (err) {
+      await page(rc, { message: rc.t("panel.err.check", { message: err.message }), messageKind: "error" });
+    }
+    return;
+  }
+
+  if (action === "panel-install") {
+    // Die Fassung kommt aus der letzten Pruefung, nicht aus dem Formular: Was
+    // ausgerollt wird, darf nicht davon abhaengen, was jemand ins Feld schreibt.
+    const state = await readPanelUpdateState(rc.app.db);
+    if (!state.newer) {
+      await page(rc, { message: rc.t("panel.upToDate", { version: state.current }) });
+      return;
+    }
+    try {
+      await applyPanelUpdate(rc.app, state.latest);
+      // Die Antwort geht noch raus, dann uebernimmt der Aktualisierungslauf und
+      // das Panel verschwindet fuer ein paar Sekunden.
+      await page(rc, { message: rc.t("panel.started", { version: state.latest }), messageKind: "warn" });
+    } catch (err) {
+      log.warn(`Selbstaktualisierung nicht gestartet: ${err.message}`);
+      await page(rc, { message: rc.t("panel.err.install", { message: err.message }), messageKind: "error" });
+    }
+    return;
+  }
+
+  /* ------------------------------------------------------ Die Spielserver */
 
   if (action === "check") {
     const started = startUpdateCheck(rc.app, { apply: false });

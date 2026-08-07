@@ -1,0 +1,40 @@
+# Das Panel im Container.
+#
+#   docker compose up -d
+#
+# Danach laeuft die Oberflaeche auf http://127.0.0.1:8410.
+#
+# Drei Festlegungen, die man kennen sollte:
+#
+# - **Der Docker-Socket ist eingehaengt.** Anders kann das Panel keine
+#   Spielserver starten. Wer Zugriff auf diesen Socket hat, ist auf dieser
+#   Maschine faktisch root — das liegt an Docker, nicht am Panel. Wer das nicht
+#   will, nimmt den Weg ueber install.sh: dort laeuft das Panel unprivilegiert.
+# - **Konfiguration und Daten liegen auf dem Wirt**, an denselben Pfaden wie
+#   innen. Das muss so sein: Die Spielserver-Container haengen ihr Verzeichnis
+#   selbst ein, und diesen Pfad loest der Docker-Dienst auf dem Wirt auf.
+# - **Der Programmcode liegt im Datentraeger panel-src**, nicht im Abbild. Das
+#   Panel aktualisiert sich damit selbst ueber Git und braucht keinen
+#   Abbild-Speicher.
+services:
+  panel:
+    build: .
+    image: dzpage-panel:local
+    container_name: dzpage-panel
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      # Von aussen erreichbar macht man das Panel mit einem Reverse-Proxy mit
+      # TLS davor — nicht, indem man diese Veroeffentlichung aufmacht.
+      DZPAGE_PANEL_BIND: 0.0.0.0
+      DZPAGE_PANEL_REPO: https://github.com/006mi4/dayz-linux-gameserverpanel.git
+    ports:
+      - "127.0.0.1:8410:8410"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/dzpage-panel:/etc/dzpage-panel
+      - /var/lib/dzpage-panel:/var/lib/dzpage-panel
+      - panel-src:/opt/dzpage-panel
+
+volumes:
+  panel-src:

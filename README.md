@@ -1,161 +1,291 @@
 # DZPage Panel
 
-Selbst installierbares Gameserver-Panel für DayZ auf Linux, gekoppelt an ein
-DZPage-Konto über einen Panel-Schlüssel.
+A self-hosted game server panel for **DayZ on Linux**, linked to your
+[dzpage.com](https://dzpage.com) account with a panel key.
 
-Das Panel steuert den **Prozess** (installieren, starten, stoppen, Dateien),
-RCon steuert das **Spiel** (Nachrichten, Kick, Ban). Beides zusammen ergibt das,
-was RCon allein nicht kann: einen abgestürzten Server wieder hochholen.
+The panel controls the **process** — install, start, stop, files, updates. RCon
+controls the **game** — messages, kick, ban. Together they do what RCon alone
+cannot: bring a crashed server back up.
 
-**Stand: Phasen 1 bis 5 gebaut.** Dienst, Einrichtungsassistent, SQLite/MySQL,
-scrypt-Anmeldung, SteamCMD mit interaktivem Login, Spielserver anlegen und
-installieren, systemd- und Docker-Laufzeit, Fernsteuerung über DZPage samt
-Neustartzeitplan mit Vorwarnung im Spiel, Update-Prüfung gegen Steam.
+*[Diese Anleitung auf Deutsch: **[README.de.md](README.de.md)**]*
 
 ---
 
-## Voraussetzungen
+## Contents
 
-- Linux mit systemd (entwickelt und geprüft auf Ubuntu 22.04)
-- `util-linux` (liefert `script`), `tar`, `curl` — auf Debian/Ubuntu im Grundsystem
-- 32-Bit-Bibliothek `lib32gcc-s1`: SteamCMD ist auch auf 64-Bit-Systemen 32-Bit
-- Node.js 24 oder neuer. Fehlt es, installiert der Installer eine eigene
-  Laufzeit nach `/usr/lib/dzpage-panel/node` — das System bleibt unberührt.
-  Node 22/23 gehen auch, dann startet der Dienst mit `--experimental-sqlite`
-  (der Installer prüft das selbst).
-- **Ein Steam-Konto, das DayZ besitzt.** Anonym lehnt Steam den Download ab
-  („No subscription"). Das kann kein Panel umgehen.
+- [What you need](#what-you-need)
+- [Install](#install) — [one command](#option-a-one-command-systemd) or [Docker](#option-b-docker)
+- [Create your panel key on DZPage](#create-your-panel-key-on-dzpage)
+- [The setup wizard](#the-setup-wizard)
+- [Game servers](#game-servers)
+- [Updates](#updates)
+- [Remote control from DZPage](#remote-control-from-dzpage)
+- [Reaching the panel from outside](#reaching-the-panel-from-outside)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Uninstall](#uninstall)
+- [Development](#development)
 
-## Installation
+---
 
-```sh
-sudo ./install.sh
+## What you need
+
+- **Linux with systemd** — developed and tested on Ubuntu 22.04. (The Docker
+  install works on any host that runs Docker.)
+- **A Steam account that owns DayZ.** Steam refuses the server download to
+  anonymous logins (“No subscription”). No panel can work around that.
+- **A DZPage account** for the panel key — free, and the key is what links this
+  panel to your account.
+- Node.js 24 or newer. If it is missing, the installer puts its own runtime in
+  `/usr/lib/dzpage-panel/node` and leaves your system alone.
+- About 6 GB of disk per DayZ server, plus ~100 MB for the panel.
+
+Everything else — SteamCMD, the 32-bit libraries it needs, git — is installed
+for you.
+
+---
+
+## Install
+
+Two ways in. They are not two products: the **same code, the same update
+channel** (git tags in this repository). Pick by how you run your box.
+
+|  | One command (systemd) | Docker |
+|---|---|---|
+| Panel runs | as its own unprivileged user | as root inside a container |
+| Game servers run | as systemd units, **one Linux user each** | as sibling containers |
+| Needs | systemd, apt | Docker + Compose |
+| Isolation between servers | per user, per cgroup limits | per container |
+| Recommended for | a normal server or VPS | hosts where everything already runs in Docker |
+
+The one-command install is the default recommendation. In the Docker install the
+panel needs the Docker socket, and **access to the Docker socket is equivalent
+to root on that machine** — that is how Docker works, not something the panel
+chooses.
+
+### Option A: one command (systemd)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh | sudo bash
 ```
 
-Der Installer legt den Dienstbenutzer `dzpage` an, richtet
-`/etc/dzpage-panel` und `/var/lib/dzpage-panel` ein, kopiert das Programm nach
-`/usr/lib/dzpage-panel`, schreibt die systemd-Unit und startet den Dienst.
-Ein zweiter Lauf aktualisiert nur — Konfiguration und Daten bleiben stehen.
+This clones the project to `/opt/dzpage-panel`, checks out the newest released
+tag and runs `install.sh`. Options are passed through after `--`:
 
-Optionen: `--no-steam-deps` (keine 32-Bit-Bibliotheken), `--no-node` (keine
-eigene Node-Laufzeit installieren).
+```bash
+curl -fsSL https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh | sudo bash -s -- --with-docker
+```
 
-Danach läuft die Oberfläche auf **http://127.0.0.1:8410**.
+If you would rather read the script before it runs — a reasonable habit — do it
+in two steps:
 
-**Vor dem Assistenten** auf dzpage.com unter `/rcon` einen Panel-Schlüssel
-erstellen (`dzp_panel_…`) — der Assistent fragt im vierten Schritt danach.
+```bash
+sudo git clone https://github.com/006mi4/dayz-linux-gameserverpanel.git /opt/dzpage-panel
+sudo /opt/dzpage-panel/install.sh
+```
 
-## Der Assistent
+Both give you exactly the same installation, including self-updates.
 
-1. **Datenbank** — SQLite (Standard, keine Einrichtung) oder MySQL/MariaDB mit
-   Verbindungstest.
-2. **Administratorkonto** — Benutzername und Passwort, gehasht mit scrypt.
-3. **Steam-Anmeldung** — Kontoname, Passwort, bei Bedarf Steam-Guard-Code.
-   Läuft live gegen SteamCMD; Fehler kommen im Klartext zurück. Überspringbar,
-   dann fehlt später nur der Download.
-4. **DZPage-Schlüssel** — eintragen, die Verbindung wird sofort geprüft.
-5. **Fertig** — weiter zur Übersicht.
+The installer creates the service user `dzpage`, sets up `/etc/dzpage-panel` and
+`/var/lib/dzpage-panel`, copies the program to `/usr/lib/dzpage-panel`, writes
+the systemd unit and starts the service. **Running it again only updates** —
+configuration and data stay untouched.
 
-Nach der Steam-Anmeldung steht auf derselben Seite „Gemerkte Anmeldung prüfen".
-Das startet SteamCMD einmal **ohne Passwort** und beantwortet damit die Frage,
-auf die es ankommt: Läuft der Download später ohne Zutun?
+Options:
 
-Der Assistent ist nur erreichbar, solange die Einrichtung läuft; danach liefern
-seine Routen 404. Ab Schritt 3 braucht er eine angemeldete Sitzung — wer später
-an den Port kommt, kann das Panel nicht übernehmen.
+| Option | Effect |
+|---|---|
+| `--no-steam-deps` | do not add the i386 architecture or 32-bit libraries |
+| `--no-node` | do not install a private Node runtime |
+| `--with-docker` | allow the Docker runtime for game servers (see below) |
 
-## Spielserver
+The panel is then at **http://127.0.0.1:8410**.
 
-Unter „Spielserver" wird ein Server angelegt: Name, drei Ports, RCon-Passwort,
-Spielerzahl, Mission und die Ressourcengrenzen. Das Panel schreibt daraus
-`serverDZ.cfg`, die BattlEye-Konfiguration und die Startumgebung; ein Klick auf
-„Spieldateien installieren" holt DayZ über SteamCMD (App 223350).
+### Option B: Docker
 
-Danach gibt es Starten, Stoppen, Neustarten, Autostart, den Laufzeitwechsel und
-„Bei DZPage anmelden" — letzteres trägt den Server mitsamt RCon-Zugang in dein
-DZPage-Konto ein, ohne dass du dort etwas abtippst.
+```bash
+git clone https://github.com/006mi4/dayz-linux-gameserverpanel.git
+cd dayz-linux-gameserverpanel
+docker compose up -d
+```
 
-**Jeder Server läuft unter einem eigenen Benutzer** (`dzsrv_<kennung>`), in
-seinem eigenen Verzeichnis, mit eigenen Speicher- und CPU-Grenzen. Er kann
-weder die Konfiguration des Panels lesen noch die Dateien der Nachbarn.
+The panel is then at **http://127.0.0.1:8410**.
 
-## Update-Prüfung
+What the compose file sets up, and why:
 
-Unter „Aktualisierungen" fragt das Panel Steam nach dem Stand des DayZ-Servers
-und vergleicht ihn mit den installierten Dateien. Verglichen werden zwei Zahlen
-aus Steams eigenem Format: die `buildid` aus
-`game/steamapps/appmanifest_223350.acf` und `depots.branches.public.buildid` aus
-`app_info_print`.
+- `/var/run/docker.sock` is mounted, because that is how the panel starts the
+  game server containers. It also means the container is root-equivalent on the
+  host.
+- `/etc/dzpage-panel` and `/var/lib/dzpage-panel` are bind-mounted **at the same
+  paths inside and outside**. That is required: game server containers mount
+  their own directory, and the Docker daemon resolves that path on the host.
+- The panel’s own code lives in the volume `panel-src`, not in the image. The
+  entrypoint clones this repository on first start. That is what lets the panel
+  update itself over git in the container too — no image registry, no rebuild.
 
-**Die Abfrage meldet sich anonym an.** Für die Auskunft über eine öffentliche App
-braucht Steam kein Konto — die Prüfung läuft also auch, bevor der Kunde sich bei
-Steam angemeldet hat. Nur das Herunterladen braucht sein Konto. Sie bekommt ein
-eigenes HOME (`/var/lib/dzpage-panel/steam-info-home`), damit die anonyme
-Anmeldung das Sitzungstoken des Kundenkontos nicht anfasst.
+In the Docker install, **Docker is the only runtime** for game servers; there is
+no systemd inside the container to start a unit in.
 
-Einstellbar ist zweierlei, und die Trennung ist Absicht:
+---
 
-| | wo | Werte |
+## Create your panel key on DZPage
+
+Do this **before** the setup wizard — step 4 asks for it.
+
+1. Sign in at [dzpage.com](https://dzpage.com).
+2. Open **RCon** (dzpage.com/rcon).
+3. In the **Panel keys** section, enter a name (for example the hostname of your
+   server) and create the key.
+4. The key (`dzp_panel_…`) is shown **exactly once**. Copy it now.
+
+The key lets a panel register itself, report its state and register servers on
+your account — nothing else. It does not grant access to your account. We store
+only a SHA-256 hash of it, and you can revoke it at any time on the same page.
+
+You can create up to three keys, and every panel that uses one shows up on that
+page with its version, platform and last contact.
+
+---
+
+## The setup wizard
+
+1. **Database** — SQLite (default, nothing to set up) or MySQL/MariaDB with a
+   connection test.
+2. **Administrator** — username and password, hashed with scrypt.
+3. **Steam login** — account name, password, Steam Guard code if asked. This
+   runs live against SteamCMD and reports errors verbatim. You can skip it; then
+   only the download is missing later.
+4. **DZPage key** — paste the key, the connection is verified immediately.
+5. **Done** — on to the dashboard.
+
+After the Steam login the same page offers **“Check the remembered login”**. It
+starts SteamCMD once **without a password** and answers the question that
+actually matters: will the download work later without anyone typing anything?
+
+The wizard is only reachable while setup is running; afterwards its routes
+return 404. From step 3 on it needs a signed-in session, so nobody who finds the
+port later can take the panel over.
+
+---
+
+## Game servers
+
+Under **Game servers** you create a server: name, three ports, RCon password,
+player count, mission and the resource limits. The panel writes `serverDZ.cfg`,
+the BattlEye configuration and the start environment from that; one click on
+**Install game files** fetches DayZ through SteamCMD (app 223350).
+
+After that you get start, stop, restart, autostart, the runtime switch and
+**“Register with DZPage”** — the last one puts the server, including its RCon
+access, into your DZPage account without you typing anything there.
+
+In the systemd install **every server runs as its own user** (`dzsrv_<id>`), in
+its own directory, with its own memory and CPU limits. It can read neither the
+panel’s configuration nor its neighbours’ files.
+
+### Runtime: systemd or Docker
+
+systemd is the default. Docker is a switch inside the panel, not a second
+install path: the game files stay where they are and are mounted into the
+container, so switching costs no re-download.
+
+To allow it, run `sudo ./install.sh --with-docker` once. That puts the service
+user into the `docker` group, which on that machine is effectively root. If you
+do not need this runtime, leave the option out.
+
+The container image is configurable with `DZPAGE_PANEL_DOCKER_IMAGE` (default
+`debian:bookworm-slim`); it must provide the libraries the DayZ server expects.
+
+---
+
+## Updates
+
+Two different things are called “update” here, and the panel keeps them apart.
+
+### The panel itself
+
+**Updates/This panel** shows the running version, the newest release and where
+it comes from. The panel asks GitHub for the tags of this repository every six
+hours — no account, no key, read-only — and treats the highest `vX.Y.Z` as the
+newest release. Pre-releases (`v1.2.3-rc1`) are ignored.
+
+| Setting | What happens when a new version appears |
+|---|---|
+| **Install it automatically** (default) | the panel installs it and restarts itself |
+| **Only report it, ask me first** | it shows up here and in the event log; you press the button |
+| **Do not look for updates** | nothing, ever |
+
+Installing restarts the panel. **Your game servers keep running** — they are
+separate units (or containers) and are not touched.
+
+If the new version does not come up, the previous one is restored automatically:
+
+- systemd install: the update runs as its own short-lived service, waits for
+  `/health`, and on failure checks out the previous commit and rolls the old
+  files back out. The result survives the restart in
+  `/var/lib/dzpage-panel/self-update.json`, with a log next to it in
+  `self-update.log`.
+- Docker install: the entrypoint counts start attempts. After the third failed
+  start it resets the checkout to the last commit that came up, so a bad release
+  cannot leave you in a restart loop.
+
+Your fork gets its own releases: the repository address comes from
+`/etc/dzpage-panel/install.json`, which the installer writes.
+
+If you installed by copying files by hand, the panel reports new versions but
+does not touch anything. Update such an installation yourself, then run
+`sudo ./install.sh` again.
+
+### DayZ server files
+
+**Updates/Servers** asks Steam for the state of the DayZ server and compares it
+with the installed files. The two numbers being compared both come from Steam’s
+own format: `buildid` from `game/steamapps/appmanifest_223350.acf` and
+`depots.branches.public.buildid` from `app_info_print`.
+
+**The query signs in anonymously.** Steam does not need an account to talk about
+a public app, so the check works before you have signed in to Steam — only
+downloading needs your account. It gets its own `HOME`
+(`/var/lib/dzpage-panel/steam-info-home`) so the anonymous login never touches
+your account’s session token.
+
+Two things are configurable, and the split is deliberate:
+
+| | where | values |
 |---|---|---|
-| Zeitplan | einmal für das Panel | aus, oder alle 30 min bis 24 h |
-| Verhalten | je Server | aus · nur melden · automatisch aktualisieren |
+| Schedule | once for the panel | off, or every 30 min to 24 h |
+| Behaviour | per server | off · only report · update automatically |
 
-„Automatisch aktualisieren" hält den Server an, holt die Dateien und startet ihn
-wieder — ohne Vorwarnung im Spiel. Für einen Server mit Leuten darauf ist „nur
-melden" die richtige Wahl; die Vorwarnung gehört zum Neustartzeitplan über
-DZPage, weil sie über RCon geht.
+“Update automatically” stops the server, fetches the files and starts it again —
+with no warning in game. For a server with players on it, “only report” is the
+right choice; the in-game warning belongs to the restart schedule on DZPage,
+because it goes through RCon.
 
-Der Zeitplan ist im Auslieferungszustand **aus**. Ein Panel, das ungefragt
-SteamCMD startet, ist nicht das, was jemand auf seiner Maschine erwartet.
-„Jetzt prüfen" prüft immer nur — eine Schaltfläche mit dieser Aufschrift darf
-keinen Server neu starten.
+The schedule ships **off**. A panel that starts SteamCMD unasked is not what
+anyone expects on their own machine. “Check now” only ever checks — a button
+with that label must not restart a server.
 
-### Der privilegierte Helfer
+---
 
-Dienste anlegen und Benutzer erzeugen kann kein unprivilegierter Prozess. Das
-Panel läuft trotzdem nicht als root: Es schickt eine Zeile an einen Socket
-(`/run/dzpage-panel-helper.sock`, nur für den Dienstbenutzer geöffnet), und
-systemd startet dafür kurz `helper.sh` als root. Der Helfer kennt genau acht
-Operationen und prüft jeden Parameter gegen ein Muster.
+## Remote control from DZPage
 
-sudo wäre der übliche Weg, funktioniert hier aber nicht: Die Unit des Panels
-setzt über `PrivateDevices` und `ProtectKernelTunables` implizit
-`NoNewPrivileges`, und damit kann sudo keine Rechte mehr erhöhen. Die Alternative
-wäre gewesen, die Härtung aufzuweichen — der Socket ist die bessere Antwort.
+Once a server is registered, it gets an **Operations** section on dzpage.com
+under RCon: start, stop, restart, update files, and a restart schedule. The
+in-game warning goes over RCon, the restart over the panel — that combination
+needs both halves.
 
-### Laufzeit: systemd oder Docker
+For this the panel holds one outgoing connection open (long poll) and picks up
+jobs. **No port needs to be opened**, and it works behind CGNAT. Every job is
+checked before it runs: known job type, target server belongs to this panel,
+result goes back, everything lands in the event log.
 
-Standard ist systemd. Docker ist eine Umschaltung im Panel, kein zweiter
-Installationsweg: Die Spieldateien bleiben, wo sie sind, und werden in den
-Container eingehängt — ein Wechsel kostet keinen Neu-Download.
+---
 
-Für die Docker-Laufzeit einmalig `sudo ./install.sh --with-docker`. Damit kommt
-der Dienstbenutzer in die Gruppe `docker`, und das entspricht auf dieser
-Maschine faktisch Rootrechten. Das liegt an Docker, nicht am Panel — wer diese
-Laufzeit nicht braucht, lässt die Option weg.
+## Reaching the panel from outside
 
-Das Container-Abbild ist über `DZPAGE_PANEL_DOCKER_IMAGE` einstellbar
-(Standard `debian:bookworm-slim`); es muss die Bibliotheken mitbringen, die der
-DayZ-Server erwartet.
-
-## Fernsteuerung über DZPage
-
-Sobald ein Server registriert ist, hat er auf dzpage.com unter RCon den
-Abschnitt „Betrieb": starten, stoppen, neu starten, Dateien aktualisieren und
-einen Neustartzeitplan. Die Vorwarnung im Spiel geht über RCon, der Neustart
-über das Panel — diese Kombination braucht beide Hälften.
-
-Das Panel hält dafür eine ausgehende Verbindung offen (Long-Poll) und holt sich
-Aufträge ab. **Es muss kein Port geöffnet werden**, und es funktioniert hinter
-CGNAT. Jeder Auftrag wird geprüft, bevor er ausgeführt wird: bekannte
-Auftragsart, Zielserver gehört zu diesem Panel, Ergebnis geht zurück, alles
-landet im Ereignisprotokoll.
-
-## Von außen erreichbar machen
-
-Das Panel bindet sich absichtlich an `127.0.0.1`. Für den Zugriff von außen
-gehört ein Reverse-Proxy mit TLS davor — ein Panel ohne TLS ins Internet zu
-stellen ist die Standardfalle bei solchen Produkten.
+The panel binds to `127.0.0.1` on purpose. For outside access, put a reverse
+proxy with TLS in front — putting a panel on the internet without TLS is the
+standard mistake with products like this.
 
 ```nginx
 server {
@@ -173,116 +303,160 @@ server {
 }
 ```
 
-Dazu in `/etc/dzpage-panel/panel.json` `"trustProxy": true` setzen und den
-Dienst neu starten. Erst dann wertet das Panel `X-Forwarded-Proto` aus und
-setzt das Secure-Flag auf dem Sitzungscookie.
+Then set `"trustProxy": true` in `/etc/dzpage-panel/panel.json` and restart the
+service. Only then does the panel read `X-Forwarded-Proto` and set the Secure
+flag on the session cookie.
 
-## Konfiguration
+---
 
-`/etc/dzpage-panel/panel.json`, Rechte 0600, gehört dem Dienstbenutzer.
+## Configuration
 
-| Feld | Bedeutung |
+`/etc/dzpage-panel/panel.json`, mode 0600, owned by the service user.
+
+| Field | Meaning |
 |---|---|
-| `bind`, `port` | Standard `127.0.0.1:8410` |
-| `trustProxy` | nur einschalten, wenn wirklich ein Proxy davorsteht |
-| `cookieSecure` | `"auto"` (Standard), `true` oder `false` |
-| `database` | `{"kind":"sqlite","file":…}` oder `{"kind":"mysql",…}` |
-| `secrets` | Sitzungs- und Verschlüsselungsschlüssel, beim ersten Start erzeugt |
-| `dzpage` | Adresse, Panel-Schlüssel, Name dieses Panels |
-| `steam.steamcmdPath` | gefundenes oder installiertes SteamCMD |
+| `bind`, `port` | default `127.0.0.1:8410` |
+| `trustProxy` | only turn on if a proxy really is in front |
+| `cookieSecure` | `"auto"` (default), `true` or `false` |
+| `database` | `{"kind":"sqlite","file":…}` or `{"kind":"mysql",…}` |
+| `secrets` | session and encryption keys, generated on first start |
+| `dzpage` | address, panel key, name of this panel |
+| `steam.steamcmdPath` | the SteamCMD that was found or installed |
 
-Ablageorte: Konfiguration `/etc/dzpage-panel/`, Daten und Spieldateien
-`/var/lib/dzpage-panel/`, Protokoll über journald (`journalctl -u dzpage-panel -f`).
+`/etc/dzpage-panel/install.json` is written by the installer and says how this
+panel was installed (`git`, `docker` or `manual`), from which repository, and
+with which options. It is owned by root: the panel reads it, it does not write
+it.
 
-**MySQL** braucht ein Paket mehr — nur dann, wenn es auch gewählt wird:
+Where things live: configuration in `/etc/dzpage-panel/`, data and game files in
+`/var/lib/dzpage-panel/`, logs in journald (`journalctl -u dzpage-panel -f`).
 
-```sh
+**MySQL** needs one more package — only if you actually choose it:
+
+```bash
 sudo -u dzpage npm install --omit=dev --prefix /usr/lib/dzpage-panel mysql2
 ```
 
-## Sicherheit
+---
 
-- Nie als root: Dienstbenutzer `dzpage`, systemd-Unit mit `ProtectSystem=strict`,
-  leerem `CapabilityBoundingSet` und Ressourcengrenzen.
-- Keine Shell in der Oberfläche. Alle Aktionen sind feste, benannte Operationen;
-  Prozesse werden mit Argumentlisten gestartet, nie über eine Shell-Zeichenkette.
-  Was doch durch eine Kommandozeile muss, wird gegen eine Positivliste geprüft.
-- Kein JavaScript im Browser. Die Inhaltsrichtlinie ist entsprechend streng
-  (`default-src 'none'`), jedes Formular trägt einen CSRF-Wert, dazu kommt eine
-  Origin-Prüfung.
-- Passwörter mit scrypt (N=2^15, r=8, p=1, 32 Byte Salt), Sitzungen als
-  HttpOnly-Cookie mit `SameSite=Strict`, Anmeldeversuche gedrosselt.
-- **Das Steam-Passwort wird nirgends gespeichert.** Es geht durch eine
-  Pseudo-Konsole direkt an SteamCMD und wird danach verworfen; gespeichert wird
-  nur, was SteamCMD selbst ablegt. Passwort und Steam-Guard-Code stehen auf der
-  Streichliste des Vorgangs und erscheinen in keinem Protokoll.
-- Der DZPage-Schlüssel liegt bei uns nur als SHA-256-Hash und ist jederzeit
-  widerrufbar. Das Panel ruft immer nur bei DZPage an — **keine Portfreigabe**.
+## Security
 
-## SteamCMD: gemessenes Verhalten
+- **Never as root.** Service user `dzpage`, systemd unit with
+  `ProtectSystem=strict`, an empty `CapabilityBoundingSet` and resource limits.
+- **The privileged helper.** Creating services and users is not something an
+  unprivileged process can do. Instead of running the panel as root, it sends
+  one line to a socket (`/run/dzpage-panel-helper.sock`, openable only by the
+  service user) and systemd briefly runs `helper.sh` as root. The helper knows
+  exactly ten named operations and checks every parameter against a pattern.
+  sudo would have been the usual answer but does not work here: the panel’s unit
+  sets `NoNewPrivileges` implicitly through `PrivateDevices` and
+  `ProtectKernelTunables`, so sudo could not raise anything anyway.
+- **No shell in the interface.** Every action is a fixed, named operation;
+  processes are started with argument lists, never through a shell string.
+  Anything that must pass a command line is checked against an allow list.
+- **No JavaScript in the browser.** The content policy is accordingly strict
+  (`default-src 'none'`), every form carries a CSRF token, plus an origin check.
+- Passwords with scrypt (N=2^15, r=8, p=1, 32-byte salt), sessions as an
+  HttpOnly cookie with `SameSite=Strict`, login attempts throttled.
+- **Your Steam password is never stored.** It goes through a pseudo terminal
+  straight to SteamCMD and is discarded; only what SteamCMD itself writes is
+  kept. Password and Steam Guard code are on the job’s redaction list and appear
+  in no log.
+- The DZPage key exists on our side only as a SHA-256 hash and can be revoked at
+  any time. The panel only ever calls DZPage — **no port forwarding**.
 
-Gegen Client-Version 1785799152 auf Ubuntu 22.04 gemessen (2026-08-06), weil
-drei Eigenheiten sonst zu falschen Ergebnissen führen:
+### SteamCMD: measured behaviour
 
-- Die Ausgabe ist **eingefärbt**. Hinter jeder Eingabeaufforderung steht eine
-  Rückstellsequenz (`password: \x1b[0m`); ohne Filter trifft kein Muster.
-- Der Start enthält harmlose Zeilen wie `ILocalize::AddFile() failed to load
-  file` — ein Fehlermuster, das `failed` ohne Rücksicht auf Groß-/Kleinschreibung
-  sucht, meldet eine Anmeldung fälschlich als gescheitert.
-- Das Ergebnis steht **mitten in der Zeile**:
+Measured against client version 1785799152 on Ubuntu 22.04 (2026-08-06), because
+three quirks would otherwise produce wrong results:
+
+- The output is **coloured**. Every prompt is followed by a reset sequence
+  (`password: \x1b[0m`); without filtering, no pattern matches.
+- Startup contains harmless lines like `ILocalize::AddFile() failed to load
+  file` — an error pattern that looks for `failed` case-insensitively reports a
+  successful login as a failure.
+- The result sits **in the middle of a line**:
   `Logging in user 'x' [U:1:0] to Steam Public...ERROR (Invalid Password)`.
-  Danach kehrt `Steam>` zurück — ein unbekannter Fehlergrund würde also als
-  Erfolg durchgehen, wenn nur der Zeilenanfang geprüft wird.
+  After that `Steam>` returns, so an unknown failure reason would pass as
+  success if only the start of the line were checked.
 
-Der erste Start lädt sich selbst nach und startet sich neu; das dauert ein bis
-zwei Minuten und ist kein Fehler.
+The first run downloads and restarts itself; that takes a minute or two and is
+not an error.
 
-## Entwicklung
+---
 
-```sh
-npm test                     # ohne Netz, ohne Datenbankserver, ohne Rootrechte
-DZPANEL_NET_TESTS=1 npm test # zusätzlich die echte SteamCMD-Installation
+## Uninstall
+
+```bash
+sudo systemctl disable --now dzpage-panel
+sudo rm -f /etc/systemd/system/dzpage-panel.service
+sudo systemctl daemon-reload
+sudo rm -rf /usr/lib/dzpage-panel /etc/dzpage-panel /opt/dzpage-panel
+sudo rm -rf /var/lib/dzpage-panel     # also deletes game files and the database
+sudo userdel dzpage
 ```
 
-Zwei Abnahmen brauchen ein echtes System und laufen deshalb getrennt:
+Docker install:
 
-```sh
-sudo ./scripts/verify-runtime.sh   # systemd: eigener Benutzer, Grenzen, Absturz, Aufräumen
-sudo ./scripts/verify-docker.sh    # Docker und der Wechsel zwischen beiden Laufzeiten
+```bash
+docker compose down -v
+sudo rm -rf /etc/dzpage-panel /var/lib/dzpage-panel
 ```
 
-Beide setzen ein installiertes Panel voraus und benutzen an Stelle von DayZ ein
-Ersatzprogramm — die echten Spieldateien brauchen ein Steam-Konto mit DayZ.
+---
 
-Für den MySQL-Teil eine Datenbank angeben:
+## Development
 
-```sh
+```bash
+npm test                     # no network, no database server, no root
+DZPANEL_NET_TESTS=1 npm test # additionally the real SteamCMD installation
+```
+
+Two acceptance checks need a real system and therefore run separately:
+
+```bash
+sudo ./scripts/verify-runtime.sh   # systemd: own user, limits, crash, cleanup
+sudo ./scripts/verify-docker.sh    # Docker and switching between both runtimes
+```
+
+Both assume an installed panel and use a stand-in instead of DayZ — the real
+game files need a Steam account that owns DayZ.
+
+For the MySQL part, point it at a database:
+
+```bash
 DZPANEL_MYSQL_HOST=127.0.0.1 DZPANEL_MYSQL_USER=dzpanel \
 DZPANEL_MYSQL_PASSWORD=… DZPANEL_MYSQL_DATABASE=dzpanel_test npm test
 ```
 
-Ohne Rootrechte starten (Pfade umbiegen):
+Run without root (paths redirected):
 
-```sh
+```bash
 DZPAGE_PANEL_CONFIG_DIR=/tmp/panel/etc DZPAGE_PANEL_DATA_DIR=/tmp/panel/lib \
 DZPAGE_PANEL_PORT=8411 node bin/dzpage-panel.js
 ```
 
-`DZPAGE_BASE_URL` biegt die DZPage-Adresse um (für Tests gegen einen Standhalter).
-Die Version steht in `src/version.js` und wird bei jeder Anmeldung an DZPage
-gemeldet — bei jeder Änderung erhöhen.
+`DZPAGE_BASE_URL` redirects the DZPage address (for tests against a stand-in),
+`DZPAGE_PANEL_GITHUB_API` the GitHub address (for tests of the update check).
 
-Die Oberfläche gibt es auf Englisch (Standard) und Deutsch. Eine weitere Sprache
-ist eine Datei in `src/i18n/` plus ein Eintrag in `src/i18n/index.js`; ein Test
-sorgt dafür, dass keine Sprache Schlüssel vergisst.
+### Releasing a version
 
-## Entfernen
+The version lives in `src/version.js` and `package.json` — a test keeps them in
+sync. It is reported to DZPage on every registration and heartbeat, and it is
+what the update check compares against.
 
-```sh
-sudo systemctl disable --now dzpage-panel
-sudo rm -f /etc/systemd/system/dzpage-panel.service
-sudo systemctl daemon-reload
-sudo rm -rf /usr/lib/dzpage-panel /etc/dzpage-panel
-sudo rm -rf /var/lib/dzpage-panel     # löscht auch Spieldateien und Datenbank
-sudo userdel dzpage
+```bash
+git tag v0.3.1 && git push origin v0.3.1
 ```
+
+Every panel out there sees that tag within six hours. There is no build step and
+no artefact: the tag *is* the release.
+
+### Interface language
+
+The panel speaks English (default) and German. Another language is one file in
+`src/i18n/` plus one entry in `src/i18n/index.js`; a test makes sure no language
+forgets a key.
+
+The code comments are in German — this started as a German project. Pull
+requests are welcome in either language.

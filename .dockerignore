@@ -1,0 +1,5 @@
+# Das Abbild bringt nur die Laufzeit mit; der Programmcode kommt beim ersten
+# Start aus Git (siehe Dockerfile). Alles ausser dem Einstiegsskript bleibt
+# deshalb draussen — das haelt den Bauvorgang kurz.
+*
+!docker/entrypoint.sh
