@@ -16,6 +16,14 @@ export const KEYS = {
   dzpageHeartbeatSeconds: "dzpage_heartbeat_seconds",
   dzpageLastSeenAt: "dzpage_last_seen_at",
   runtime: "runtime",
+
+  /** Update-Pruefung: Zeitplan und letzter bekannter Stand bei Steam. */
+  updateCheckEnabled: "update_check_enabled",
+  updateCheckInterval: "update_check_interval_minutes",
+  updateCheckedAt: "update_checked_at",
+  updateAvailableBuild: "update_available_build",
+  updatePublishedAt: "update_published_at",
+  updateLastError: "update_last_error",
 };
 
 export async function getSetting(db, name) {

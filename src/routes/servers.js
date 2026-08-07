@@ -12,13 +12,28 @@ import {
   serverDir,
   updateServer,
 } from "../store/servers.js";
-import { getSetting, KEYS } from "../store/settings.js";
+import { getSetting, getSettings, KEYS } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
 import { runtimeFor, RUNTIME_IDS } from "../runtime/index.js";
 import { provisionServer } from "../servers/install.js";
+import { installedBuildId } from "../servers/updates.js";
 import { writeServerFiles } from "../servers/config.js";
 import { registerServerWithDzpage } from "../dzpage/servers.js";
-import { csrfInput, escapeHtml, field, notice, relativeTime } from "../http/html.js";
+import {
+  card,
+  csrfInput,
+  dot,
+  emptyState,
+  escapeHtml,
+  field,
+  icon,
+  meter,
+  notice,
+  pageHead,
+  pill,
+  relativeTime,
+} from "../http/html.js";
+import { updateState } from "./updates.js";
 import { log } from "../log.js";
 
 /**
@@ -44,12 +59,39 @@ const ACTIONS = new Set([
   "delete-confirm",
 ]);
 
-function statePill(t, state) {
-  const kind = state === "running" ? "ok" : state === "failed" ? "warn" : "off";
-  return `<span class="pill ${kind}">${escapeHtml(t(`servers.state.${state}`))}</span>`;
+/** Zustandsfarbe: laeuft, haelt an, abgestuerzt, aus. */
+function stateTone(state) {
+  if (state === "running") return "ok";
+  if (state === "failed") return "bad";
+  if (state === "starting" || state === "stopping") return "warn";
+  return "off";
 }
 
-async function withState(rc, servers) {
+function statePill(t, state) {
+  return pill(stateTone(state), t(`servers.state.${state}`));
+}
+
+/**
+ * Eine Zeile in der Serverliste. Steht auch auf der Uebersicht, damit ein
+ * Server dort und hier gleich aussieht.
+ */
+export function serverRow(t, { server, status }) {
+  return `<a class="srv" href="/server?id=${escapeHtml(server.id)}">
+    <span class="id">
+      ${dot(stateTone(status.state))}
+      <span>
+        <span class="name">${escapeHtml(server.name)}</span>
+        <span class="meta">:${Number(server.game_port)} · ${escapeHtml(server.runtime)}</span>
+      </span>
+    </span>
+    <span class="right">
+      ${server.install_state === "ready" ? "" : pill("off", t(`servers.installState.${server.install_state}`))}
+      ${statePill(t, status.state)}
+    </span>
+  </a>`;
+}
+
+export async function withState(rc, servers) {
   const out = [];
   for (const server of servers) {
     let status = { state: "unknown" };
@@ -70,28 +112,22 @@ export async function list(rc) {
   const rows = await withState(rc, await listServers(rc.app.db));
 
   const body = rows.length
-    ? `<table class="status">
-         <tr><th>${escapeHtml(t("servers.name"))}</th><th>${escapeHtml(t("servers.ports"))}</th><th>${escapeHtml(
-           t("servers.state.heading"),
-         )}</th></tr>
-         ${rows
-           .map(
-             ({ server, status }) => `<tr>
-               <th><a href="/server?id=${escapeHtml(server.id)}">${escapeHtml(server.name)}</a></th>
-               <td>${Number(server.game_port)} · ${Number(server.query_port)} · ${Number(server.rcon_port)}</td>
-               <td>${statePill(t, status.state)}</td>
-             </tr>`,
-           )
-           .join("")}
-       </table>`
-    : `<p class="lede">${escapeHtml(t("servers.empty"))}</p>`;
+    ? `<div class="srv-list">${rows.map((row) => serverRow(t, row)).join("")}</div>`
+    : emptyState({
+        iconName: "server",
+        text: t("servers.empty"),
+        action: `<a class="btn primary" href="/servers/new">${icon("plus")}${escapeHtml(t("servers.new"))}</a>`,
+      });
 
   rc.page(
     200,
     t("servers.title"),
-    `<h1>${escapeHtml(t("servers.title"))}</h1>
-     <div class="card">${body}</div>
-     <div class="actions"><a class="button" href="/servers/new">${escapeHtml(t("servers.new"))}</a></div>`,
+    `${pageHead({
+      title: t("servers.title"),
+      lede: t("servers.lede"),
+      actions: `<a class="btn primary" href="/servers/new">${icon("plus")}${escapeHtml(t("servers.new"))}</a>`,
+    })}
+     ${card(body)}`,
   );
 }
 
@@ -101,8 +137,6 @@ function createForm(rc, { values = {}, error = null } = {}) {
   const t = rc.t;
   const value = (name, fallback) => escapeHtml(values[name] ?? fallback);
   return `
-    <h1>${escapeHtml(t("servers.new"))}</h1>
-    <p class="lede">${escapeHtml(t("servers.newLede"))}</p>
     ${error ? notice("error", error) : ""}
     <form method="post" action="/servers/new">
       ${csrfInput(rc.csrf)}
@@ -163,26 +197,27 @@ function createForm(rc, { values = {}, error = null } = {}) {
         </div>
       </details>
       <div class="actions">
-        <button class="primary" type="submit">${escapeHtml(t("servers.create"))}</button>
-        <a class="button secondary" href="/servers">${escapeHtml(t("common.cancel"))}</a>
+        <button class="btn primary" type="submit">${escapeHtml(t("servers.create"))}</button>
+        <a class="btn secondary" href="/servers">${escapeHtml(t("common.cancel"))}</a>
       </div>
     </form>`;
 }
 
+function createPage(rc, options) {
+  return `${pageHead({ title: rc.t("servers.new"), lede: rc.t("servers.newLede") })}
+    ${card(createForm(rc, options))}`;
+}
+
 export async function create(rc) {
   if (rc.method === "GET") {
-    rc.page(200, rc.t("servers.new"), `<div class="card">${createForm(rc)}</div>`);
+    rc.page(200, rc.t("servers.new"), createPage(rc));
     return;
   }
 
   const values = Object.fromEntries(rc.form.entries());
   const checked = checkServerInput(values);
   if (!checked.ok) {
-    rc.page(
-      400,
-      rc.t("servers.new"),
-      `<div class="card">${createForm(rc, { values, error: rc.t(`servers.err.${checked.code}`) })}</div>`,
-    );
+    rc.page(400, rc.t("servers.new"), createPage(rc, { values, error: rc.t(`servers.err.${checked.code}`) }));
     return;
   }
 
@@ -191,10 +226,7 @@ export async function create(rc) {
     rc.page(
       400,
       rc.t("servers.new"),
-      `<div class="card">${createForm(rc, {
-        values,
-        error: rc.t("servers.err.port_taken", { name: conflict.id }),
-      })}</div>`,
+      createPage(rc, { values, error: rc.t("servers.err.port_taken", { name: conflict.id }) }),
     );
     return;
   }
@@ -207,6 +239,37 @@ export async function create(rc) {
 }
 
 /* ------------------------------------------------------------------- Detail */
+
+/** Speicherverbrauch gegen die gesetzte Grenze. */
+function memoryRow(t, server, status) {
+  const usedMb = Math.round(status.memoryBytes / (1024 * 1024));
+  const maxMb = Number(server.memory_max_mb) || 0;
+  const percent = maxMb ? (usedMb / maxMb) * 100 : 0;
+  const tone = percent >= 90 ? "bad" : percent >= 75 ? "warn" : "";
+  return `<div class="meter-row">
+      ${meter(percent, { tone })}
+      <span class="val">${usedMb} MB / ${maxMb} MB</span>
+    </div>`;
+}
+
+function updateCard(t, { server, installed, available, state }) {
+  const rows = [
+    [t("updates.installed"), `<span class="mono">${escapeHtml(installed || "—")}</span>`],
+    [t("updates.available"), `<span class="mono">${escapeHtml(available || "—")}</span>`],
+    [t("servers.state.heading"), pill(state === "current" ? "ok" : state === "outdated" ? "warn" : "off", t(`updates.state.${state}`))],
+    [t("updates.mode.heading"), escapeHtml(t(`updates.mode.${server.update_mode || "off"}`))],
+  ]
+    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`)
+    .join("");
+
+  return card(
+    `<table class="status">${rows}</table>
+     <div class="actions">
+       <a class="btn secondary sm" href="/updates">${icon("download")}${escapeHtml(t("updates.setUp"))}</a>
+     </div>`,
+    { title: t("updates.card.heading") },
+  );
+}
 
 export async function detail(rc) {
   const t = rc.t;
@@ -226,77 +289,110 @@ export async function detail(rc) {
     logText = err.message;
   }
 
-  const installed = server.install_state === "ready";
-  const action = (name, label, kind = "secondary", disabled = false) =>
-    `<button class="${kind}" type="submit" name="action" value="${escapeHtml(name)}"${
+  const settings = await getSettings(rc.app.db, [KEYS.updateAvailableBuild]);
+  const installed = installedBuildId(server.id) ?? server.installed_build ?? null;
+  const available = settings[KEYS.updateAvailableBuild];
+  const state = updateState(installed, available);
+
+  const filesReady = server.install_state === "ready";
+  const action = (name, label, kind = "secondary", { disabled = false, iconName = "" } = {}) =>
+    `<button class="btn ${kind}" type="submit" name="action" value="${escapeHtml(name)}"${
       disabled ? " disabled" : ""
-    }>${escapeHtml(label)}</button>`;
+    }>${iconName ? icon(iconName) : ""}${escapeHtml(label)}</button>`;
 
   const rows = [
-    [t("servers.state.heading"), statePill(t, status.state)],
-    [t("servers.installState.heading"), escapeHtml(t(`servers.installState.${server.install_state}`))],
-    [t("servers.ports"), `${Number(server.game_port)} · ${Number(server.query_port)} · ${Number(server.rcon_port)}`],
+    [t("servers.ports"), `<span class="mono">${Number(server.game_port)} · ${Number(server.query_port)} · ${Number(server.rcon_port)}</span>`],
     [t("servers.mission"), escapeHtml(server.mission)],
     [t("servers.maxPlayers"), String(Number(server.max_players))],
-    [t("dash.status.runtime"), escapeHtml(server.runtime)],
     [t("servers.limits"), `${Number(server.memory_max_mb)} MB · ${Number(server.cpu_quota)} %`],
-    [
-      t("servers.autostart"),
-      status.autostart ? escapeHtml(t("common.yes")) : escapeHtml(t("common.no")),
-    ],
+    [t("servers.autostart"), pill(status.autostart ? "ok" : "off", status.autostart ? t("common.yes") : t("common.no"))],
     [
       t("servers.dzpage"),
-      server.dzpage_server_id
-        ? `<span class="pill ok">${escapeHtml(t("servers.registered"))}</span>`
-        : `<span class="pill off">${escapeHtml(t("common.missing"))}</span>`,
+      server.dzpage_server_id ? pill("ok", t("servers.registered")) : pill("off", t("common.missing")),
     ],
   ];
-  if (status.pid) rows.push([t("servers.pid"), String(status.pid)]);
-  if (status.memoryBytes) {
-    rows.push([t("dash.status.memory"), `${Math.round(status.memoryBytes / (1024 * 1024))} MB`]);
-  }
-  if (status.restarts) rows.push([t("servers.restarts"), String(status.restarts)]);
+  if (status.pid) rows.push([t("servers.pid"), `<span class="mono">${Number(status.pid)}</span>`]);
+  if (status.memoryBytes) rows.push([t("servers.memoryUse"), memoryRow(t, server, status)]);
+  if (status.restarts) rows.push([t("servers.restarts"), String(Number(status.restarts))]);
+
+  const head = `<div class="srv-head">
+      <div>
+        <div class="title">${dot(stateTone(status.state))}<h1>${escapeHtml(server.name)}</h1></div>
+        <div class="meta">
+          <span class="mono">:${Number(server.game_port)}</span>
+          <span>${escapeHtml(server.runtime)}</span>
+          <span>${escapeHtml(t(`servers.installState.${server.install_state}`))}</span>
+          ${statePill(t, status.state)}
+        </div>
+      </div>
+      <form method="post" action="/server/action">
+        ${csrfInput(rc.csrf)}
+        <input type="hidden" name="id" value="${escapeHtml(server.id)}">
+        <div class="btn-group">
+          ${action("start", t("servers.actions.start"), "primary", { disabled: !filesReady, iconName: "play" })}
+          ${action("stop", t("servers.actions.stop"), "secondary", { iconName: "stop" })}
+          ${action("restart", t("servers.actions.restart"), "secondary", { disabled: !filesReady, iconName: "restart" })}
+        </div>
+      </form>
+    </div>`;
+
+  const manage = card(
+    `<form method="post" action="/server/action">
+       ${csrfInput(rc.csrf)}
+       <input type="hidden" name="id" value="${escapeHtml(server.id)}">
+       <div class="actions tight">
+         ${action(
+           "install",
+           filesReady ? t("servers.actions.update") : t("servers.actions.install"),
+           filesReady ? "secondary" : "primary",
+           { iconName: "download" },
+         )}
+         ${action(status.autostart ? "autostart-off" : "autostart-on", t("servers.actions.autostart"), "secondary", {
+           iconName: "power",
+         })}
+       </div>
+       <div class="actions tight">
+         ${action(
+           server.runtime === "docker" ? "runtime-systemd" : "runtime-docker",
+           t("servers.actions.switchRuntime", { runtime: server.runtime === "docker" ? "systemd" : "Docker" }),
+           "secondary",
+           { iconName: "cpu" },
+         )}
+         ${action("register", t("servers.actions.register"), "secondary", {
+           disabled: Boolean(server.dzpage_server_id),
+           iconName: "link",
+         })}
+       </div>
+       <div class="actions tight">
+         ${action("delete", t("servers.actions.delete"), "danger", { iconName: "trash" })}
+       </div>
+     </form>`,
+    { title: t("servers.controls") },
+  );
 
   rc.page(
     200,
     server.name,
-    `<h1>${escapeHtml(server.name)}</h1>
-     <div class="card">
-       <table class="status">${rows
-         .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`)
-         .join("")}</table>
+    `${head}
+     <div class="grid cols-2">
+       <div>
+         ${card(
+           `<table class="status">${rows
+             .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${value}</td></tr>`)
+             .join("")}</table>`,
+           { title: t("servers.details") },
+         )}
+       </div>
+       <div>
+         ${updateCard(t, { server, installed, available, state })}
+         ${manage}
+       </div>
      </div>
-     <div class="card">
-       <h2>${escapeHtml(t("servers.controls"))}</h2>
-       <form method="post" action="/server/action">
-         ${csrfInput(rc.csrf)}
-         <input type="hidden" name="id" value="${escapeHtml(server.id)}">
-         <div class="actions">
-           ${action("start", t("servers.actions.start"), "primary", !installed)}
-           ${action("stop", t("servers.actions.stop"))}
-           ${action("restart", t("servers.actions.restart"), "secondary", !installed)}
-         </div>
-         <div class="actions">
-           ${action("install", installed ? t("servers.actions.update") : t("servers.actions.install"))}
-           ${action(status.autostart ? "autostart-off" : "autostart-on", t("servers.actions.autostart"))}
-           ${action(
-             server.runtime === "docker" ? "runtime-systemd" : "runtime-docker",
-             t("servers.actions.switchRuntime", {
-               runtime: server.runtime === "docker" ? "systemd" : "Docker",
-             }),
-           )}
-         </div>
-         <div class="actions">
-           ${action("register", t("servers.actions.register"), "secondary", Boolean(server.dzpage_server_id))}
-           ${action("delete", t("servers.actions.delete"))}
-         </div>
-       </form>
-     </div>
-     <div class="card">
-       <h2>${escapeHtml(t("servers.log"))}</h2>
-       <pre class="log">${escapeHtml(logText || t("servers.logEmpty"))}</pre>
-     </div>
-     <div class="actions"><a class="button secondary" href="/servers">${escapeHtml(t("common.back"))}</a></div>`,
+     ${card(`<pre class="log">${escapeHtml(logText || t("servers.logEmpty"))}</pre>`, {
+       title: t("servers.log"),
+       sub: t("servers.logSub"),
+     })}
+     <div class="actions"><a class="btn secondary" href="/servers">${escapeHtml(t("common.back"))}</a></div>`,
   );
 }
 
@@ -370,12 +466,12 @@ export async function act(rc) {
     rc.page(
       500,
       server.name,
-      `<div class="card">
-         ${notice("error", t("servers.err.action", { message: err.message }))}
-         <div class="actions"><a class="button secondary" href="${escapeHtml(back)}">${escapeHtml(
+      card(
+        `${notice("error", t("servers.err.action", { message: err.message }))}
+         <div class="actions"><a class="btn secondary" href="${escapeHtml(back)}">${escapeHtml(
            t("common.back"),
-         )}</a></div>
-       </div>`,
+         )}</a></div>`,
+      ),
     );
     return;
   }
@@ -388,22 +484,20 @@ function renderDeleteConfirm(rc, server) {
   rc.page(
     200,
     t("servers.actions.delete"),
-    `<div class="card">
-       <h1>${escapeHtml(t("servers.deleteHeading", { name: server.name }))}</h1>
-       ${notice("warn", t("servers.deleteWarning"))}
-       <form method="post" action="/server/action">
-         ${csrfInput(rc.csrf)}
-         <input type="hidden" name="id" value="${escapeHtml(server.id)}">
-         <div class="actions">
-           <button class="primary" type="submit" name="action" value="delete-confirm">${escapeHtml(
-             t("servers.actions.deleteConfirm"),
-           )}</button>
-           <a class="button secondary" href="/server?id=${escapeHtml(server.id)}">${escapeHtml(
-             t("common.cancel"),
-           )}</a>
-         </div>
-       </form>
-     </div>`,
+    `${pageHead({ title: t("servers.deleteHeading", { name: server.name }) })}
+     ${card(
+       `${notice("warn", t("servers.deleteWarning"))}
+        <form method="post" action="/server/action">
+          ${csrfInput(rc.csrf)}
+          <input type="hidden" name="id" value="${escapeHtml(server.id)}">
+          <div class="actions">
+            <button class="btn danger" type="submit" name="action" value="delete-confirm">${escapeHtml(
+              t("servers.actions.deleteConfirm"),
+            )}</button>
+            <a class="btn secondary" href="/server?id=${escapeHtml(server.id)}">${escapeHtml(t("common.cancel"))}</a>
+          </div>
+        </form>`,
+     )}`,
   );
 }
 
@@ -439,7 +533,11 @@ function startInstall(rc, server) {
       await updateServer(app.db, server.id, { install_state: "failed" });
       throw err;
     }
-    await updateServer(app.db, server.id, { install_state: "ready", installed_at: Date.now() });
+    await updateServer(app.db, server.id, {
+      install_state: "ready",
+      installed_at: Date.now(),
+      installed_build: installedBuildId(server.id),
+    });
     await recordEvent(app.db, { kind: "server.install", message: `${server.name} installiert` });
     return { serverId: server.id };
   });
@@ -474,15 +572,14 @@ export async function jobPage(rc) {
   rc.page(
     200,
     t("job.heading"),
-    `<div class="card">
-       <h1>${escapeHtml(t("job.heading"))}</h1>
-       ${top}
-       <p class="hint">${escapeHtml(t("job.started", { when: relativeTime(t, job.startedAt) }))}</p>
-       <div class="actions"><a class="button secondary" href="${escapeHtml(back)}">${escapeHtml(
-         t("common.back"),
-       )}</a></div>
-       <pre class="log">${escapeHtml(job.lines.join("\n") || t("job.running"))}</pre>
-     </div>`,
+    `${pageHead({
+      title: t("job.heading"),
+      lede: t("job.started", { when: relativeTime(t, job.startedAt) }),
+      actions: `<a class="btn secondary" href="${escapeHtml(back)}">${escapeHtml(t("common.back"))}</a>`,
+    })}
+     ${card(`${top}<pre class="log">${escapeHtml(job.lines.join("\n") || t("job.running"))}</pre>`, {
+       title: t("servers.log"),
+     })}`,
     { head },
   );
 }

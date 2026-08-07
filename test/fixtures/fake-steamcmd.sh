@@ -13,7 +13,22 @@
 # Mit Argumenten (+login KONTO +quit) verhaelt es sich wie die Pruefung des
 # gemerkten Sitzungstokens: "cached*" ist angemeldet, alles andere fragt nach
 # dem Passwort.
+#
+# "+login anonymous ... +app_info_print" gibt die mitgelieferte echte Ausgabe
+# aus (am Steam-Client vom 2026-08-07 abgenommen) — damit prueft die Suite den
+# Leser gegen das Format, das wirklich kommt, und nicht gegen einen Nachbau.
 EXPECTED_PASSWORD='panel-test-passwort'
+
+if [ "${1:-}" = '+login' ] && [ "${2:-}" = 'anonymous' ]; then
+  for arg in "$@"; do
+    if [ "$arg" = '+app_info_print' ]; then
+      cat "$(dirname "$0")/steamcmd-app-info-223350.txt"
+      exit 0
+    fi
+  done
+  printf 'Connecting anonymously to Steam Public...OK\n'
+  exit 0
+fi
 
 if [ "${1:-}" = '+login' ]; then
   printf 'Steam Console Client (c) Valve Corporation - version 1728594755\n'

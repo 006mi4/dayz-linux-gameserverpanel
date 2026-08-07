@@ -10,7 +10,7 @@ was RCon allein nicht kann: einen abgestürzten Server wieder hochholen.
 **Stand: Phasen 1 bis 5 gebaut.** Dienst, Einrichtungsassistent, SQLite/MySQL,
 scrypt-Anmeldung, SteamCMD mit interaktivem Login, Spielserver anlegen und
 installieren, systemd- und Docker-Laufzeit, Fernsteuerung über DZPage samt
-Neustartzeitplan mit Vorwarnung im Spiel.
+Neustartzeitplan mit Vorwarnung im Spiel, Update-Prüfung gegen Steam.
 
 ---
 
@@ -78,6 +78,37 @@ DZPage-Konto ein, ohne dass du dort etwas abtippst.
 **Jeder Server läuft unter einem eigenen Benutzer** (`dzsrv_<kennung>`), in
 seinem eigenen Verzeichnis, mit eigenen Speicher- und CPU-Grenzen. Er kann
 weder die Konfiguration des Panels lesen noch die Dateien der Nachbarn.
+
+## Update-Prüfung
+
+Unter „Aktualisierungen" fragt das Panel Steam nach dem Stand des DayZ-Servers
+und vergleicht ihn mit den installierten Dateien. Verglichen werden zwei Zahlen
+aus Steams eigenem Format: die `buildid` aus
+`game/steamapps/appmanifest_223350.acf` und `depots.branches.public.buildid` aus
+`app_info_print`.
+
+**Die Abfrage meldet sich anonym an.** Für die Auskunft über eine öffentliche App
+braucht Steam kein Konto — die Prüfung läuft also auch, bevor der Kunde sich bei
+Steam angemeldet hat. Nur das Herunterladen braucht sein Konto. Sie bekommt ein
+eigenes HOME (`/var/lib/dzpage-panel/steam-info-home`), damit die anonyme
+Anmeldung das Sitzungstoken des Kundenkontos nicht anfasst.
+
+Einstellbar ist zweierlei, und die Trennung ist Absicht:
+
+| | wo | Werte |
+|---|---|---|
+| Zeitplan | einmal für das Panel | aus, oder alle 30 min bis 24 h |
+| Verhalten | je Server | aus · nur melden · automatisch aktualisieren |
+
+„Automatisch aktualisieren" hält den Server an, holt die Dateien und startet ihn
+wieder — ohne Vorwarnung im Spiel. Für einen Server mit Leuten darauf ist „nur
+melden" die richtige Wahl; die Vorwarnung gehört zum Neustartzeitplan über
+DZPage, weil sie über RCon geht.
+
+Der Zeitplan ist im Auslieferungszustand **aus**. Ein Panel, das ungefragt
+SteamCMD startet, ist nicht das, was jemand auf seiner Maschine erwartet.
+„Jetzt prüfen" prüft immer nur — eine Schaltfläche mit dieser Aufschrift darf
+keinen Server neu starten.
 
 ### Der privilegierte Helfer
 

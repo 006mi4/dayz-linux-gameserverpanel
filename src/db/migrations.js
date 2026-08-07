@@ -128,6 +128,21 @@ export const MIGRATIONS = [
       `CREATE UNIQUE INDEX servers_game_port ON servers(game_port)`,
     ],
   },
+  {
+    id: 3,
+    name: "update-pruefung",
+    // update_mode: off | notify | auto. installed_build ist die Nummer aus
+    // Steams appmanifest — sie steht in der Datenbank, damit die Uebersicht
+    // nicht bei jedem Aufruf ueber die Spieldateien laufen muss.
+    sqlite: [
+      `ALTER TABLE servers ADD COLUMN update_mode TEXT NOT NULL DEFAULT 'off'`,
+      `ALTER TABLE servers ADD COLUMN installed_build TEXT`,
+    ],
+    mysql: [
+      `ALTER TABLE servers ADD COLUMN update_mode VARCHAR(10) NOT NULL DEFAULT 'off'`,
+      `ALTER TABLE servers ADD COLUMN installed_build VARCHAR(20)`,
+    ],
+  },
 ];
 
 const VERSION_TABLE = {

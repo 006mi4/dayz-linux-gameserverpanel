@@ -1,0 +1,298 @@
+Redirecting stderr to '/tmp/steamcmd-probe/home/Steam/logs/stderr.txt'
+ILocalize::AddFile() failed to load file "public/steambootstrapper_english.txt".
+[  0%] Checking for available update...
+[----] Downloading update (0 of 40,321 KB)...
+[  0%] Downloading update (0 of 40,321 KB)...
+[  0%] Downloading update (0 of 40,321 KB)...
+[  0%] Downloading update (2,640 of 40,321 KB)...
+[  6%] Downloading update (5,599 of 40,321 KB)...
+[ 13%] Downloading update (8,568 of 40,321 KB)...
+[ 21%] Downloading update (11,526 of 40,321 KB)...
+[ 28%] Downloading update (14,508 of 40,321 KB)...
+[ 35%] Downloading update (17,606 of 40,321 KB)...
+[ 43%] Downloading update (19,832 of 40,321 KB)...
+[ 49%] Downloading update (21,801 of 40,321 KB)...
+[ 54%] Downloading update (23,778 of 40,321 KB)...
+[ 58%] Downloading update (25,917 of 40,321 KB)...
+[ 64%] Downloading update (27,509 of 40,321 KB)...
+[ 68%] Downloading update (28,693 of 40,321 KB)...
+[ 71%] Downloading update (29,679 of 40,321 KB)...
+[ 73%] Downloading update (30,787 of 40,321 KB)...
+[ 76%] Downloading update (31,769 of 40,321 KB)...
+[ 78%] Downloading update (32,757 of 40,321 KB)...
+[ 81%] Downloading update (33,815 of 40,321 KB)...
+[ 83%] Downloading update (34,798 of 40,321 KB)...
+[ 86%] Downloading update (35,784 of 40,321 KB)...
+[ 88%] Downloading update (36,892 of 40,321 KB)...
+[ 91%] Downloading update (37,880 of 40,321 KB)...
+[ 93%] Downloading update (38,876 of 40,321 KB)...
+[ 96%] Downloading update (39,933 of 40,321 KB)...
+[ 99%] Downloading update (40,321 of 40,321 KB)...
+[100%] Download Complete.
+[----] Applying update...
+[----] Extracting package...
+[----] Extracting package...
+[----] Extracting package...
+[----] Extracting package...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Cleaning up...
+[----] Update complete, launching...
+steamcmd.sh[312941]: Starting  /tmp/steamcmd-probe/cmd/linux32/steamcmd
+Redirecting stderr to '/tmp/steamcmd-probe/home/Steam/logs/stderr.txt'
+Logging directory: '/tmp/steamcmd-probe/home/Steam/logs'
+[  0%] Checking for available updates...
+[----] Verifying installation...
+[  0%] Downloading update...
+[  0%] Checking for available updates...
+[----] Download complete.
+[----] Extracting package...
+[----] Extracting package...
+[----] Extracting package...
+[----] Extracting package...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Installing update...
+[----] Cleaning up...
+[----] Update complete, launching Steamcmd...
+UpdateUI: skip show logo
+steamcmd.sh[312941]: Restarting steamcmd by request...
+steamcmd.sh[312941]: Starting  /tmp/steamcmd-probe/cmd/linux32/steamcmd
+Redirecting stderr to '/tmp/steamcmd-probe/home/Steam/logs/stderr.txt'
+Logging directory: '/tmp/steamcmd-probe/home/Steam/logs'
+[  0%] Checking for available updates...
+[----] Verifying installation...
+UpdateUI: skip show logo
+Steam Console Client (c) Valve Corporation - version 1785799152
+-- type 'quit' to exit --
+Loading Steam API...[0mOK
+[0m
+Connecting anonymously to Steam Public...[0mOK
+[0mWaiting for client config...[0mOK
+[0mWaiting for user info...[0mOK
+[0mAppID : 223350, change number : 37787251/37787251, last change : Fri Aug  7 09:35:02 2026 
+"223350"
+{
+	"common"
+	{
+		"name"		"DayZ Server"
+		"type"		"Tool"
+		"ReleaseState"		"released"
+		"parent"		"221100"
+		"oslist"		"windows"
+		"clienticon"		"f8c16699ed5ce1cc8aa9b15ed3fdd66553fce2bf"
+		"clienttga"		"e529b20af459d1307c2e885c68293ba137971ecc"
+		"icon"		"16a985dfee9b093d76a0ffc4cf4c77ba20c2eb0d"
+		"logo"		"6af07b51e817a029260910719d2a77439d00463b"
+		"logo_small"		"6af07b51e817a029260910719d2a77439d00463b_thumb"
+		"eulas"
+		{
+			"0"
+			{
+				"id"		"223350_eula_0"
+				"name"		"DayZ Server EULA"
+				"url"		"https://store.steampowered.com//eula/223350_eula_0"
+				"version"		"1"
+			}
+		}
+		"metacritic_name"		"DayZ Server"
+		"small_capsule"
+		{
+			"english"		"capsule_231x87.jpg"
+		}
+		"header_image"
+		{
+			"english"		"header.jpg"
+		}
+		"store_asset_mtime"		"1537366562"
+		"associations"
+		{
+			"0"
+			{
+				"type"		"developer"
+				"name"		"Bohemia Interactive"
+			}
+			"1"
+			{
+				"type"		"publisher"
+				"name"		"Bohemia Interactive"
+			}
+		}
+		"steam_release_date"		"1537365480"
+		"gameid"		"223350"
+	}
+	"extended"
+	{
+		"developer"		"Bohemia Interactive"
+		"gamedir"		"ValveTestApp223350"
+		"homepage"		"http://dayz.com"
+		"icon"		""
+		"noservers"		"0"
+		"sourcegame"		"1"
+		"state"		"eStateAvailable"
+		"thirdpartycdkey"		"1"
+		"visibleonlywhensubscribed"		"1"
+		"publisher"		"Bohemia Interactive"
+	}
+	"config"
+	{
+		"contenttype"		"3"
+		"installdir"		"DayZServer"
+		"launch"
+		{
+			"0"
+			{
+				"executable"		"DayZServer_x64.exe"
+				"description"		"Launch Server"
+				"type"		"server"
+				"config"
+				{
+					"oslist"		"windows"
+					"osarch"		"64"
+				}
+			}
+		}
+	}
+	"depots"
+	{
+		"preloadonly"		"1"
+		"overridescddb"		"1"
+		"228985"
+		{
+			"config"
+			{
+				"oslist"		"windows"
+			}
+			"depotfromapp"		"228980"
+			"sharedinstall"		"1"
+		}
+		"228988"
+		{
+			"config"
+			{
+				"oslist"		"windows"
+			}
+			"depotfromapp"		"228980"
+			"sharedinstall"		"1"
+		}
+		"229004"
+		{
+			"config"
+			{
+				"oslist"		"windows"
+			}
+			"depotfromapp"		"228980"
+			"sharedinstall"		"1"
+		}
+		"223351"
+		{
+			"systemdefined"		"1"
+			"manifests"
+			{
+				"public"
+				{
+					"gid"		"6659531882202343917"
+					"size"		"3633398952"
+					"download"		"1514885904"
+				}
+				"experimental_public"
+				{
+					"gid"		"6851238236280575555"
+					"size"		"1857037019"
+					"download"		"702440208"
+				}
+			}
+		}
+		"223352"
+		{
+			"config"
+			{
+				"oslist"		"linux"
+				"osarch"		"64"
+			}
+			"manifests"
+			{
+				"public"
+				{
+					"gid"		"5787596040022409463"
+					"size"		"81064280"
+					"download"		"28379296"
+				}
+			}
+		}
+		"223353"
+		{
+			"config"
+			{
+				"oslist"		"windows"
+				"osarch"		"64"
+			}
+			"manifests"
+			{
+				"public"
+				{
+					"gid"		"2660128169447199588"
+					"size"		"42549248"
+					"download"		"16073888"
+				}
+				"experimental_public"
+				{
+					"gid"		"6169702869082609638"
+					"size"		"32900600"
+					"download"		"10542720"
+				}
+			}
+		}
+		"223354"
+		{
+			"manifests"
+			{
+				"public"
+				{
+					"gid"		"5942427905682088592"
+					"size"		"303237896"
+					"download"		"11927552"
+				}
+			}
+		}
+		"branches"
+		{
+			"public"
+			{
+				"buildid"		"24041098"
+				"timeupdated"		"1784109540"
+				"timebuildupdated"		"1783089295"
+			}
+			"experimental_public"
+			{
+				"buildid"		"3889697"
+				"description"		"Unstable testing version"
+				"timeupdated"		"1559730582"
+				"timebuildupdated"		"1559723312"
+			}
+		}
+		"privatebranches"		"1"
+	}
+	"ufs"
+	{
+		"quota"		"0"
+		"maxnumfiles"		"0"
+		"hidecloudui"		"1"
+		"ignoreexternalfiles"		"1"
+	}
+}
+Unloading Steam API...[0mOK
+[0m

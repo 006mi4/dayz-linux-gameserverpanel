@@ -7,6 +7,7 @@ import { createJobs } from "./jobs.js";
 import { createThrottle } from "./auth/throttle.js";
 import { createHeartbeat } from "./dzpage/heartbeat.js";
 import { createPoller } from "./dzpage/poller.js";
+import { createUpdateWatcher } from "./servers/updates.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
 import { trimEvents } from "./store/events.js";
 import { DATA_DIR } from "./paths.js";
@@ -36,6 +37,7 @@ export async function startPanel({ port, bind } = {}) {
   app.throttle = createThrottle();
   app.heartbeat = createHeartbeat(app);
   app.poller = createPoller(app);
+  app.updateWatcher = createUpdateWatcher(app);
 
   if (db) {
     await purgeExpiredSessions(db).catch((err) => log.warn(`Sitzungen aufräumen: ${err.message}`));
@@ -61,6 +63,7 @@ export async function startPanel({ port, bind } = {}) {
 
   app.heartbeat.start();
   app.poller.start();
+  app.updateWatcher.start();
 
   return {
     app,
@@ -70,6 +73,7 @@ export async function startPanel({ port, bind } = {}) {
     async stop() {
       app.heartbeat.stop();
       app.poller.stop();
+      app.updateWatcher.stop();
       await new Promise((resolve) => server.close(resolve));
       await app.db?.close().catch(() => undefined);
     },

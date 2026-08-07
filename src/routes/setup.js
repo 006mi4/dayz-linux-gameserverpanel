@@ -19,11 +19,9 @@ import { log } from "../log.js";
  */
 
 function page(rc, { step, title, body }) {
-  rc.page(
-    200,
-    title,
-    `${stepper(rc.t, step)}<div class="card">${body}</div>`,
-  );
+  // Ohne Seitenleiste: der Assistent ist ein linearer Ablauf und soll keine
+  // Abzweigungen anbieten, die es an dieser Stelle noch gar nicht gibt.
+  rc.page(200, title, `${stepper(rc.t, step)}<div class="card">${body}</div>`, { nav: false });
 }
 
 export async function index(rc) {

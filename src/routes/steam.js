@@ -105,6 +105,7 @@ export async function page(rc) {
           messageKind: ptyMissing ? "error" : "ok",
         }),
       ),
+      { nav: !inSetup },
     );
     return;
   }
@@ -124,6 +125,7 @@ export async function page(rc) {
         409,
         rc.t("setup.step.steam"),
         frame(rc, inSetup, loginForm(rc, { account, inSetup, connected: true, message: rc.t("setup.steam.busy") })),
+        { nav: !inSetup },
       );
       return;
     }
@@ -153,6 +155,7 @@ export async function page(rc) {
           message: rc.t("setup.steam.failed", { message: "Kontoname oder Passwort fehlt." }),
         }),
       ),
+      { nav: !inSetup },
     );
     return;
   }
@@ -184,6 +187,7 @@ export async function page(rc) {
       409,
       rc.t("setup.step.steam"),
       frame(rc, inSetup, loginForm(rc, { account, inSetup, message: rc.t("setup.steam.busy") })),
+      { nav: !inSetup },
     );
     return;
   }
@@ -263,6 +267,6 @@ export async function status(rc) {
     200,
     t("setup.step.steam"),
     frame(rc, inSetup, `<h1>${escapeHtml(t("setup.steam.heading"))}</h1>${top}${actions}${logBlock}`),
-    { head },
+    { head, nav: !inSetup },
   );
 }

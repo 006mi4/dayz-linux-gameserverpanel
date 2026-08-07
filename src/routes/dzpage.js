@@ -56,7 +56,9 @@ export async function connect(rc) {
 
   const render = (status, body) => {
     const inner = `<div class="card">${body}</div>`;
-    rc.page(status, rc.t("setup.step.dzpage"), inSetup ? `${stepper(rc.t, 4)}${inner}` : inner);
+    rc.page(status, rc.t("setup.step.dzpage"), inSetup ? `${stepper(rc.t, 4)}${inner}` : inner, {
+      nav: !inSetup,
+    });
   };
 
   if (rc.method === "GET") {

@@ -171,7 +171,12 @@ class RequestContext {
     this.res.end(body);
   }
 
-  page(status, title, body, { headers, head } = {}) {
+  /**
+   * `nav` entscheidet ueber die Seitenleiste. Standard ist "wer angemeldet ist,
+   * sieht die Navigation" — der Assistent setzt sie ausdruecklich ab, weil ein
+   * linearer Ablauf keine Abzweigungen anbieten soll.
+   */
+  page(status, title, body, { headers, head, nav } = {}) {
     this.send(
       status,
       layout({
@@ -182,6 +187,7 @@ class RequestContext {
         body,
         path: this.path,
         head,
+        nav: nav === undefined ? Boolean(this.user) : nav,
       }),
       headers,
     );

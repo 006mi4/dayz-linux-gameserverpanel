@@ -4,6 +4,7 @@ import * as dashboard from "../routes/dashboard.js";
 import * as steam from "../routes/steam.js";
 import * as dzpage from "../routes/dzpage.js";
 import * as servers from "../routes/servers.js";
+import * as updates from "../routes/updates.js";
 
 /**
  * Feste Routentabelle. Es gibt keine dynamischen Pfade und keine Platzhalter —
@@ -41,6 +42,9 @@ export const ROUTES = [
   { path: "/server", methods: ["GET"], access: "user", handler: servers.detail },
   { path: "/server/action", methods: ["POST"], access: "user", handler: servers.act },
   { path: "/job", methods: ["GET"], access: "user", handler: servers.jobPage },
+
+  // Update-Pruefung: Zeitplan fuer alle, Verhalten je Server.
+  { path: "/updates", methods: ["GET", "POST"], access: "user", handler: updates.index },
 ];
 
 /** Fuer den Installer und fuer Ueberwachung: eine Zeile, keine Details. */
