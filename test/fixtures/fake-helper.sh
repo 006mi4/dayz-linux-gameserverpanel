@@ -48,6 +48,7 @@ case "$ACTION" in
     STATE=$(cat "$STATE_FILE" 2>/dev/null || echo inactive)
     if [ "$STATE" = running ]; then
       printf 'ActiveState=active\nSubState=running\nMainPID=4242\nMemoryCurrent=524288000\nNRestarts=1\n'
+      printf 'ExecMainStartTimestamp=Mon 2026-01-05 10:00:00 UTC\n'
     elif [ "$STATE" = starting ]; then
       # systemd zwischen zwei Startversuchen eines abstuerzenden Servers
       printf 'ActiveState=activating\nSubState=auto-restart\nMainPID=0\nMemoryCurrent=[not set]\nNRestarts=7\n'

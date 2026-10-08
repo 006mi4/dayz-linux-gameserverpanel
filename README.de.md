@@ -14,9 +14,10 @@ wieder hochholen.
 
 ## Was du brauchst
 
-- **Linux mit systemd auf x86_64**, entwickelt und von Anfang bis Ende geprüft
-  auf Ubuntu 22.04. Ubuntu 24.04 und Debian 12/13 haben dieselben Pakete und
-  sollten laufen, sind aber noch nicht vollständig durchgetestet. ARM-Rechner
+- **Linux mit systemd auf x86_64**, von Anfang bis Ende geprüft auf Ubuntu
+  22.04, Ubuntu 24.04 und Debian 12 (auch auf einem minimalen Debian 12 ohne
+  sudo, git und xz). Debian 13 hat dieselben Pakete und sollte laufen, ist aber
+  noch nicht vollständig durchgetestet. ARM-Rechner
   lehnt der Installer ab: DayZ-Server und SteamCMD gibt es nur für x86_64. (Der
   Docker-Weg läuft auf jedem x86_64-Wirt, auf dem Docker läuft.)
 - **Ein Steam-Konto, das DayZ besitzt.** Anonym lehnt Steam den Download ab
@@ -64,6 +65,12 @@ verbindet es von selbst mit deinem DZPage-Konto und fragt am Ende nach dem
 Steam-Konto, das DayZ besitzt. Bevor es verbindet, zeigt das Terminal den
 Namen des DZPage-Kontos und fragt, ob das deins ist, so wie AirDrop vor dem
 Annehmen fragt. Das war es. Der Kopplungscode gilt einmal und 30 Minuten.
+
+Als root angemeldet auf einer Maschine ohne `sudo` (ein Debian, bei dessen
+Installation ein root-Passwort gesetzt wurde, hat keins)? Dann `sudo` einfach
+weglassen, der Rest bleibt gleich:
+`curl -fsSL https://dzpage.com/panel/install.sh | bash -s -- --pair dzp_pair_…`.
+Mit `sudo` bricht der Befehl dort sofort mit „sudo: command not found" ab.
 
 Ohne diesen Befehl geht es auch:
 
@@ -394,19 +401,40 @@ keinen Server neu starten.
 
 ## Fernsteuerung über DZPage
 
-Sobald ein Server registriert ist, hat er auf dzpage.com unter RCon den
-Abschnitt „Betrieb": starten, stoppen, neu starten, Dateien aktualisieren und
-einen Neustartzeitplan. Die Vorwarnung im Spiel geht über RCon, der Neustart
-über das Panel — diese Kombination braucht beide Hälften.
+dzpage.com ist die Verwaltung, die lokale Oberfläche des Panels braucht man
+dafür nicht. Unter RCon stehen alle Server aller verbundenen Maschinen mit ihrem
+Zustand: läuft oder abgestürzt, seit wann, Arbeitsspeicher, Neustarts,
+installierte DayZ-Fassung und ob SteamCMD eine Steam-Anmeldung hat. Von dort
+aus geht:
+
+- **Server anlegen** (Name, Ports, RCon-Passwort, Spielerplätze, Mission,
+  Grenzen) und auf Wunsch gleich installieren. Das Panel prüft die Angaben mit
+  derselben Prüfung wie sein eigenes Formular und meldet den Server danach
+  selbst bei DZPage an.
+- **Installieren und aktualisieren** mit Fortschritt (Prozent und letzte Zeile
+  von SteamCMD), dazu starten, stoppen, neu starten und ein Neustartzeitplan.
+  Die Vorwarnung im Spiel geht über RCon, der Neustart über das Panel; diese
+  Kombination braucht beide Hälften.
+- **Serverprotokoll**: die letzten 200 Zeilen des Prozessprotokolls.
+- **Bei DZPage anmelden** für Server, die im Panel angelegt wurden, und
+  **löschen** (mit eingetipptem Servernamen, samt Spielständen).
 
 Das Panel hält dafür eine ausgehende Verbindung offen (Long-Poll) und holt sich
 Aufträge ab. **Für das Panel selbst muss kein Port geöffnet werden**, und es
 funktioniert hinter CGNAT. (Die Spielserver brauchen ihre Ports, siehe Firewall
 oben: Das RCon von DZPage verbindet sich mit ihnen.) Jeder Auftrag wird geprüft,
-bevor er ausgeführt wird: bekannte Auftragsart, Zielserver gehört zu diesem
-Panel, ein Start braucht installierte Spieldateien, Ergebnis geht zurück, alles
-landet im Ereignisprotokoll. Aufträge für denselben Server laufen nacheinander,
-nie gleichzeitig.
+bevor er ausgeführt wird: feste Auftragsarten, Zielserver gehört zu diesem
+Panel, jedes Feld einer Nutzlast geht durch dieselbe Prüfung wie im Panel, ein
+Start braucht installierte Spieldateien, Ergebnis geht zurück, alles landet im
+Ereignisprotokoll. Aufträge für denselben Server laufen nacheinander. Läuft im
+Panel gerade ein anderer Vorgang (etwa eine Installation), wartet ein Auftrag,
+statt abzubrechen. Von dzpage.com aus legt das Panel höchstens 20 Server an.
+
+Den Zustand meldet das Panel mit jedem Herzschlag (einmal pro Minute) und
+direkt nach jeder Änderung; solange ein Server startet oder anhält, fasst es
+alle zehn Sekunden nach. Den Steam-Kontonamen meldet es nicht, nur ob eine
+Anmeldung besteht. Das RCon-Passwort eines auf dzpage.com bestellten Servers
+liegt dort nur verschlüsselt und nur, bis das Panel den Auftrag abgeholt hat.
 
 ---
 

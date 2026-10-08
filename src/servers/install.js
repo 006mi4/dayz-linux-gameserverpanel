@@ -96,6 +96,23 @@ export async function installGameFiles({ config, server, account, job }) {
 }
 
 /**
+ * Fortschritt aus der Ausgabe von SteamCMD, fuer die Anzeige auf dzpage.com:
+ * die letzte Zeile mit "progress: 12.34" samt Prozentwert. Ohne eine solche
+ * Zeile nur die letzte Zeile, damit man sieht, wo es steht.
+ */
+export function steamProgress(lines) {
+  const tail = lines.slice(-40);
+  for (let index = tail.length - 1; index >= 0; index -= 1) {
+    const match = tail[index].match(/progress:\s*(\d{1,3}(?:\.\d+)?)/i);
+    if (match) {
+      return { percent: Math.min(100, Math.max(0, Number(match[1]))), text: tail[index].trim().slice(0, 200) };
+    }
+  }
+  const last = tail.at(-1);
+  return { percent: null, text: last ? last.trim().slice(0, 200) : null };
+}
+
+/**
  * Welche Systembibliotheken findet DayZServer nicht? Gefragt wird der Lader
  * selbst (ldd), mit demselben LD_LIBRARY_PATH wie beim Start. So ist die
  * Antwort fuer genau diese Maschine richtig, ganz gleich, welche Verteilung
@@ -197,6 +214,16 @@ const QUIET_JOB = { append() {} };
  * steht der Server auf "fehlgeschlagen" und wird nicht wieder gestartet.
  */
 export async function updateGameFiles(app, server, job = QUIET_JOB) {
+  try {
+    return await replaceGameFiles(app, server, job);
+  } finally {
+    // Installiert, fehlgeschlagen, wieder gestartet: dzpage.com soll es
+    // gleich sehen und nicht erst mit dem naechsten Herzschlag.
+    app.reporter?.nudge();
+  }
+}
+
+async function replaceGameFiles(app, server, job) {
   const runtime = runtimeFor(server);
   const firstInstall = server.install_state !== "ready";
 
@@ -213,6 +240,7 @@ export async function updateGameFiles(app, server, job = QUIET_JOB) {
 
   const account = await getSetting(app.db, KEYS.steamAccount);
   await updateServer(app.db, server.id, { install_state: "installing" });
+  app.reporter?.nudge();
   try {
     await provisionServer({
       config: app.config,

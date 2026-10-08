@@ -9,6 +9,7 @@
 #   badpass*     Passwort wird immer abgelehnt
 #   guard*       fragt zusaetzlich nach dem Steam-Guard-Code (54321)
 #   ask*         stellt eine unbekannte Rueckfrage
+#   cachedslow*  wie cached*, aber die Installation dauert einige Sekunden
 #
 # Mit Argumenten (+login KONTO +quit) verhaelt es sich wie die Pruefung des
 # gemerkten Sitzungstokens: "cached*" ist angemeldet, alles andere fragt nach
@@ -40,6 +41,19 @@ if [ "${1:-}" = '+force_install_dir' ] && [ "${3:-}" = '+login' ]; then
   printf 'Steam Console Client (c) Valve Corporation - version 1728594755\n'
   printf 'Loading Steam API...OK\n'
   case "$account" in
+    cachedslow*)
+      # Wie ein echter Download: einige Sekunden mit Zwischenstaenden.
+      printf "Logging in user '%s' [U:1:0] to Steam Public...OK\n" "$account"
+      mkdir -p "$dir/steamapps"
+      for step in 10.00 35.50 62.25 88.75; do
+        printf ' Update state (0x61) downloading, progress: %s (1024 / 4096)\n' "$step"
+        sleep 1
+      done
+      printf '#!/bin/sh\nexit 0\n' > "$dir/DayZServer"
+      chmod 0755 "$dir/DayZServer"
+      cp "$(dirname "$0")/appmanifest_223350.acf" "$dir/steamapps/appmanifest_223350.acf"
+      printf "Success! App '223350' fully installed.\n"
+      ;;
     cached*)
       printf "Logging in user '%s' [U:1:0] to Steam Public...OK\n" "$account"
       mkdir -p "$dir/steamapps"

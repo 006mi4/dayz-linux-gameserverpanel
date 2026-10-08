@@ -7,6 +7,7 @@ import { createJobs } from "./jobs.js";
 import { createThrottle } from "./auth/throttle.js";
 import { createHeartbeat } from "./dzpage/heartbeat.js";
 import { createPoller } from "./dzpage/poller.js";
+import { createReporter } from "./dzpage/report.js";
 import { createUpdateWatcher } from "./servers/updates.js";
 import { announceSelfUpdateResult, createPanelUpdateWatcher, markBootSuccessful } from "./panel/updates.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
@@ -49,6 +50,7 @@ export async function startPanel({ port, bind } = {}) {
 
   const app = createApp({ config, db, jobs: createJobs() });
   app.throttle = createThrottle();
+  app.reporter = createReporter(app);
   app.heartbeat = createHeartbeat(app);
   app.poller = createPoller(app);
   app.updateWatcher = createUpdateWatcher(app);
@@ -93,6 +95,7 @@ export async function startPanel({ port, bind } = {}) {
   log.info(`DZPage Panel ${PANEL_VERSION} hört auf ${url}`);
   if (setupOpen) log.info(`Einrichtung offen: Assistent unter ${url}/setup, Einrichtungscode in ${SETUP_CODE_FILE}`);
 
+  app.reporter.start();
   app.heartbeat.start();
   app.poller.start();
   app.updateWatcher.start();
@@ -109,6 +112,7 @@ export async function startPanel({ port, bind } = {}) {
     url,
     port: actual.port,
     async stop() {
+      app.reporter.stop();
       app.heartbeat.stop();
       app.poller.stop();
       app.updateWatcher.stop();

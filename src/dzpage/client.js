@@ -70,7 +70,9 @@ export class DzpageClient {
       return { ok: false, code: payload?.error === "revoked" ? "revoked" : payload?.error || "invalid_key" };
     }
     if (response.status === 400) return { ok: false, code: payload?.error || "bad_request" };
-    if (response.status === 404) return { ok: false, code: payload?.error || "unknown_panel" };
+    // Ohne JSON-Antwort gibt es den Endpunkt nicht (aelteres dzpage.com); das
+    // ist etwas anderes als eine Panel-ID, die DZPage nicht kennt.
+    if (response.status === 404) return { ok: false, code: payload?.error || "not_found" };
     return { ok: false, code: "server", status: response.status };
   }
 

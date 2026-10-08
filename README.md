@@ -30,9 +30,10 @@ cannot: bring a crashed server back up.
 
 ## What you need
 
-- **Linux with systemd on x86_64** — developed and tested end to end on Ubuntu
-  22.04. Ubuntu 24.04 and Debian 12/13 use the same packages and should work,
-  but have not been run through completely yet. ARM machines are refused: the
+- **Linux with systemd on x86_64**, tested end to end on Ubuntu 22.04, Ubuntu
+  24.04 and Debian 12 (also a minimal Debian 12 without sudo, git or xz).
+  Debian 13 uses the same packages and should work, but has not been run
+  through completely yet. ARM machines are refused: the
   DayZ server and SteamCMD only exist for x86_64. (The Docker install works on
   any x86_64 host that runs Docker.)
 - **A Steam account that owns DayZ.** Steam refuses the server download to
@@ -80,6 +81,11 @@ it to your DZPage account on its own, and at the end asks for the Steam account
 that owns DayZ. Before it links, the terminal shows the DZPage account name and
 asks whether that is yours, the same way AirDrop asks before it accepts. That
 is all. The pairing code works once and expires after 30 minutes.
+
+Logged in as root on a machine without `sudo` (Debian installed with a root
+password has none)? Then leave out `sudo`, everything else stays the same:
+`curl -fsSL https://dzpage.com/panel/install.sh | bash -s -- --pair dzp_pair_…`.
+With `sudo` there, the command stops at once with "sudo: command not found".
 
 Without that command it works too:
 
@@ -398,18 +404,38 @@ with that label must not restart a server.
 
 ## Remote control from DZPage
 
-Once a server is registered, it gets an **Operations** section on dzpage.com
-under RCon: start, stop, restart, update files, and a restart schedule. The
-in-game warning goes over RCon, the restart over the panel — that combination
-needs both halves.
+dzpage.com is the place to manage servers; the panel's local interface is not
+needed for it. Under RCon it lists every server on every connected machine with
+its state: running or crashed, since when, memory, restarts, installed DayZ
+build, and whether SteamCMD has a Steam login. From there you can:
+
+- **Create a server** (name, ports, RCon password, player slots, mission,
+  limits) and install it right away. The panel checks the input with the same
+  validation as its own form and then registers the server with DZPage itself.
+- **Install and update** with progress (percentage and the last SteamCMD
+  line), plus start, stop, restart and a restart schedule. The in-game warning
+  goes over RCon, the restart over the panel; that combination needs both
+  halves.
+- **Server log**: the last 200 lines of the process log.
+- **Add to DZPage** for servers created in the panel, and **delete** (after
+  typing the server name, including saves).
 
 For this the panel holds one outgoing connection open (long poll) and picks up
 jobs. **The panel itself needs no open port**, and it works behind CGNAT. (The
 game servers do need theirs, see Firewall above: RCon from DZPage connects to
-them.) Every job is checked before it runs: known job type, target server
-belongs to this panel, a start needs installed game files, result goes back,
+them.) Every job is checked before it runs: fixed job types, target server
+belongs to this panel, every payload field goes through the same validation as
+in the panel, a start needs installed game files, the result goes back, and
 everything lands in the event log. Jobs for the same server run one after
-another, never at the same time.
+another. If another operation is running in the panel (an installation, say), a
+job waits instead of failing. From dzpage.com the panel creates at most 20
+servers.
+
+The panel reports the state with every heartbeat (once a minute) and right
+after every change; while a server is starting or stopping it checks again
+every ten seconds. It does not report the Steam account name, only whether a
+login exists. The RCon password of a server ordered on dzpage.com is stored
+there only encrypted and only until the panel has picked up the job.
 
 ---
 

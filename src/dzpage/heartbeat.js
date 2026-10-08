@@ -11,6 +11,8 @@ import { log } from "../log.js";
  *
  * Bei Netzfehlern wird der Abstand verdoppelt (bis 15 Minuten) — ein Panel auf
  * einer Leitung, die gerade weg ist, darf nicht im Sekundentakt klopfen.
+ *
+ * Nach jedem gelungenen Herzschlag geht der Zustandsbericht hinaus (report.js).
  */
 
 const DEFAULT_INTERVAL_S = 60;
@@ -43,6 +45,10 @@ export function createHeartbeat(app) {
         if (result.heartbeatSeconds) {
           await setSetting(app.db, KEYS.dzpageHeartbeatSeconds, result.heartbeatSeconds);
         }
+        // Mit jedem Herzschlag der Zustand der Server: Speicher und Laufzeit
+        // aendern sich ohne Anlass, und ein abgestuerzter Server meldet sich
+        // nicht von selbst.
+        await app.reporter?.report({ force: true });
       } else if (result.code === "unknown_panel") {
         // DZPage kennt diese Panel-ID nicht mehr — neu anmelden statt aufgeben.
         log.warn("DZPage kennt dieses Panel nicht mehr, melde neu an.");

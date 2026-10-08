@@ -115,9 +115,23 @@ export class Client {
  * inklusive der Fehlercodes aus src/lib/panel/api.ts.
  */
 export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef", account = "TestKonto" } = {}) {
-  const calls = { register: [], heartbeat: [], servers: [], unregister: [], results: [], polls: 0, pair: [] };
-  /** failRegister: die naechsten n Anmeldungen scheitern mit 503 (DZPage kurz weg). */
-  const state = { revoked: false, unknownPanel: false, failRegister: 0 };
+  const calls = {
+    register: [],
+    heartbeat: [],
+    servers: [],
+    unregister: [],
+    results: [],
+    progress: [],
+    reports: [],
+    reportMisses: 0,
+    polls: 0,
+    pair: [],
+  };
+  /**
+   * failRegister: die naechsten n Anmeldungen scheitern mit 503 (DZPage kurz weg).
+   * noReport: dzpage.com kennt den Zustandsbericht noch nicht (404 ohne JSON).
+   */
+  const state = { revoked: false, unknownPanel: false, failRegister: 0, noReport: false };
   const queue = [];
   /**
    * Kopplung wie auf DZPage: Einmal-Codes (dzp_pair_...) und Geraete-Codes.
@@ -200,10 +214,22 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
         calls.servers.push(payload);
         return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7" });
       }
+      if (path === "/api/panel/v1/report") {
+        if (state.noReport) {
+          calls.reportMisses += 1;
+          res.writeHead(404, { "content-type": "text/html" });
+          res.end("<!doctype html><title>404</title>");
+          return;
+        }
+        calls.reports.push(payload);
+        return send(200, { ok: true });
+      }
       if (path === "/api/panel/v1/poll") {
-        // POST ist die Rueckmeldung, GET das Abholen.
+        // POST ist die Rueckmeldung, GET das Abholen. "running" ist ein
+        // Zwischenstand und steht getrennt vom Ergebnis.
         if (req.method === "POST") {
-          calls.results.push(payload);
+          if (payload.status === "running") calls.progress.push(payload);
+          else calls.results.push(payload);
           return send(200, { ok: true });
         }
         calls.polls += 1;

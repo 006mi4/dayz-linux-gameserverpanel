@@ -1,14 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
 import {
   checkServerInput,
   createServer,
-  deleteServer,
   DEFAULTS,
   findPortConflict,
   getServer,
   listServers,
-  serverDir,
   updateServer,
 } from "../store/servers.js";
 import { getSettings, KEYS } from "../store/settings.js";
@@ -17,7 +14,8 @@ import { runtimeFor, RUNTIME_IDS } from "../runtime/index.js";
 import { availableRuntimes } from "../panel/installation.js";
 import { installedBuildId, updateGameFiles } from "../servers/install.js";
 import { writeServerFiles } from "../servers/config.js";
-import { registerServerWithDzpage, unregisterServerWithDzpage } from "../dzpage/servers.js";
+import { registerServerWithDzpage } from "../dzpage/servers.js";
+import { removeServer } from "../servers/remove.js";
 import {
   card,
   csrfInput,
@@ -234,6 +232,7 @@ export async function create(rc) {
   writeServerFiles(server, checked.value.password);
   await recordEvent(rc.app.db, { kind: "server.create", message: `Server ${server.name} angelegt` });
   log.info(`Server ${server.id} angelegt`);
+  rc.app.reporter?.nudge();
   rc.redirect(`/server?id=${server.id}`);
 }
 
@@ -493,17 +492,8 @@ export async function act(rc) {
         // Waehrend SteamCMD in das Verzeichnis schreibt, waere ein Loeschen ein
         // Wettlauf: die Installation legte danach Teile wieder an.
         if (rc.app.jobs.current()?.running) throw new Error(t("servers.err.busy"));
-        await runtime.destroy(server);
-        rmSync(serverDir(server.id), { recursive: true, force: true });
-        // Bei DZPage abschalten, sonst stuende dort ein Server, den es nicht mehr
-        // gibt, und der RCon-Arbeiter versuchte weiter, ihn zu erreichen.
-        const unregistered = await unregisterServerWithDzpage(rc.app, server).catch((err) => ({
-          ok: false,
-          message: err.message,
-        }));
-        if (!unregistered.ok) log.warn(`Server ${server.id} bei DZPage nicht abgemeldet: ${unregistered.message}`);
-        await deleteServer(rc.app.db, server.id);
-        await recordEvent(rc.app.db, { kind: "server.delete", message: `Server ${server.name} entfernt` });
+        await removeServer(rc.app, server);
+        rc.app.reporter?.nudge();
         rc.redirect("/servers");
         return;
       }
@@ -512,6 +502,7 @@ export async function act(rc) {
         return;
     }
     await recordEvent(rc.app.db, { kind: `server.${action}`, message: `${server.name}: ${action}` });
+    rc.app.reporter?.nudge();
   } catch (err) {
     log.warn(`Aktion ${action} auf ${server.id} fehlgeschlagen: ${err.message}`);
     rc.page(
