@@ -14,9 +14,10 @@ wieder hochholen.
 
 ## Was du brauchst
 
-- **Linux mit systemd auf x86_64**, entwickelt und von Anfang bis Ende geprüft
-  auf Ubuntu 22.04. Ubuntu 24.04 und Debian 12/13 haben dieselben Pakete und
-  sollten laufen, sind aber noch nicht vollständig durchgetestet. ARM-Rechner
+- **Linux mit systemd auf x86_64**, von Anfang bis Ende geprüft auf Ubuntu
+  22.04, Ubuntu 24.04 und Debian 12 (auch auf einem minimalen Debian 12 ohne
+  sudo, git und xz). Debian 13 hat dieselben Pakete und sollte laufen, ist aber
+  noch nicht vollständig durchgetestet. ARM-Rechner
   lehnt der Installer ab: DayZ-Server und SteamCMD gibt es nur für x86_64. (Der
   Docker-Weg läuft auf jedem x86_64-Wirt, auf dem Docker läuft.)
 - **Ein Steam-Konto, das DayZ besitzt.** Anonym lehnt Steam den Download ab
@@ -64,6 +65,12 @@ verbindet es von selbst mit deinem DZPage-Konto und fragt am Ende nach dem
 Steam-Konto, das DayZ besitzt. Bevor es verbindet, zeigt das Terminal den
 Namen des DZPage-Kontos und fragt, ob das deins ist, so wie AirDrop vor dem
 Annehmen fragt. Das war es. Der Kopplungscode gilt einmal und 30 Minuten.
+
+Als root angemeldet auf einer Maschine ohne `sudo` (ein Debian, bei dessen
+Installation ein root-Passwort gesetzt wurde, hat keins)? Dann `sudo` einfach
+weglassen, der Rest bleibt gleich:
+`curl -fsSL https://dzpage.com/panel/install.sh | bash -s -- --pair dzp_pair_…`.
+Mit `sudo` bricht der Befehl dort sofort mit „sudo: command not found" ab.
 
 Ohne diesen Befehl geht es auch:
 

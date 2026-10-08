@@ -30,9 +30,10 @@ cannot: bring a crashed server back up.
 
 ## What you need
 
-- **Linux with systemd on x86_64** — developed and tested end to end on Ubuntu
-  22.04. Ubuntu 24.04 and Debian 12/13 use the same packages and should work,
-  but have not been run through completely yet. ARM machines are refused: the
+- **Linux with systemd on x86_64**, tested end to end on Ubuntu 22.04, Ubuntu
+  24.04 and Debian 12 (also a minimal Debian 12 without sudo, git or xz).
+  Debian 13 uses the same packages and should work, but has not been run
+  through completely yet. ARM machines are refused: the
   DayZ server and SteamCMD only exist for x86_64. (The Docker install works on
   any x86_64 host that runs Docker.)
 - **A Steam account that owns DayZ.** Steam refuses the server download to
@@ -80,6 +81,11 @@ it to your DZPage account on its own, and at the end asks for the Steam account
 that owns DayZ. Before it links, the terminal shows the DZPage account name and
 asks whether that is yours, the same way AirDrop asks before it accepts. That
 is all. The pairing code works once and expires after 30 minutes.
+
+Logged in as root on a machine without `sudo` (Debian installed with a root
+password has none)? Then leave out `sudo`, everything else stays the same:
+`curl -fsSL https://dzpage.com/panel/install.sh | bash -s -- --pair dzp_pair_…`.
+With `sudo` there, the command stops at once with "sudo: command not found".
 
 Without that command it works too:
 

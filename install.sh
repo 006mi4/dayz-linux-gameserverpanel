@@ -85,13 +85,14 @@ if [ -r /etc/os-release ]; then
   OS_ID=$(. /etc/os-release && echo "${ID:-}")
   OS_VERSION=$(. /etc/os-release && echo "${VERSION_ID:-}")
   OS_NAME=$(. /etc/os-release && echo "${PRETTY_NAME:-$OS_ID $OS_VERSION}")
-  # Ehrlich bleiben: Von Anfang bis Ende durchgetestet ist Ubuntu 22.04. Die
-  # anderen drei haben dieselben Pakete unter denselben Namen und sollten
+  # Ehrlich bleiben: Von Anfang bis Ende durchgetestet sind Ubuntu 22.04 und
+  # 24.04 und Debian 12, dieses auch als minimales System ohne sudo, git und
+  # xz. Debian 13 hat dieselben Pakete unter denselben Namen und sollte
   # laufen; alles andere ist ungeprueft.
   case "$OS_ID:$OS_VERSION" in
-    ubuntu:22.04) note "$OS_NAME" ;;
-    ubuntu:24.04|debian:12|debian:13) note "$OS_NAME (sollte laufen, noch nicht vollstaendig durchgetestet)" ;;
-    *) warn "$OS_NAME ist ungeprueft. Entwickelt auf Ubuntu 22.04; weiter auf eigene Verantwortung." ;;
+    ubuntu:22.04|ubuntu:24.04|debian:12) note "$OS_NAME" ;;
+    debian:13) note "$OS_NAME (sollte laufen, noch nicht vollstaendig durchgetestet)" ;;
+    *) warn "$OS_NAME ist ungeprueft. Geprueft sind Ubuntu 22.04 und 24.04 und Debian 12; weiter auf eigene Verantwortung." ;;
   esac
 fi
 
@@ -130,6 +131,11 @@ if command -v apt-get >/dev/null 2>&1; then
   for pkg in util-linux tar ca-certificates curl; do
     dpkg -s "$pkg" >/dev/null 2>&1 || MISSING="$MISSING $pkg"
   done
+  # Node kommt als .tar.xz. Ein minimales Debian 12 hat kein xz, und tar
+  # scheitert dann erst beim Entpacken ("xz: Cannot exec").
+  if [ "$WITH_NODE_INSTALL" -eq 1 ]; then
+    dpkg -s xz-utils >/dev/null 2>&1 || MISSING="$MISSING xz-utils"
+  fi
   # git nur, wenn es auch gebraucht wird: es ist der Kanal fuer Aktualisierungen.
   if [ "$SOURCE_IS_GIT" -eq 1 ]; then
     dpkg -s git >/dev/null 2>&1 || MISSING="$MISSING git"
@@ -153,7 +159,7 @@ if command -v apt-get >/dev/null 2>&1; then
   fi
 else
   say "Kein apt gefunden — bitte selbst sicherstellen"
-  note "util-linux (script), tar, ca-certificates und die 32-Bit-Bibliothek"
+  note "util-linux (script), tar, xz, ca-certificates und die 32-Bit-Bibliothek"
   note "libgcc (i386) fuer SteamCMD muessen vorhanden sein."
 fi
 
@@ -178,18 +184,22 @@ if [ -z "$NODE_BIN" ] && [ "$WITH_NODE_INSTALL" -eq 1 ]; then
     aarch64|arm64) NODE_ARCH=linux-arm64 ;;
     *) die "Nicht unterstuetzte Architektur: $ARCH — bitte Node $NODE_MAJOR_MIN+ selbst installieren." ;;
   esac
-  ( cd "$TMP"
-    curl -fsSL -O "https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt"
+  # Jeder Schritt mit eigenem "|| exit 1": Links von "|| die" schaltet bash
+  # "set -e" auch innerhalb der Unterschale ab. Bis 0.4.0 lief deshalb eine
+  # falsche Pruefsumme einfach durch, und tar entpackte trotzdem.
+  ( cd "$TMP" || exit 1
+    curl -fsSL -O "https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt" || exit 1
     FILE=$(grep "$NODE_ARCH.tar.xz" SHASUMS256.txt | awk '{print $2}' | head -1)
     [ -n "$FILE" ] || exit 1
-    curl -fsSL -O "https://nodejs.org/dist/latest-v24.x/$FILE"
+    curl -fsSL -O "https://nodejs.org/dist/latest-v24.x/$FILE" || exit 1
     # Nur herunterladen reicht nicht: die Pruefsumme kommt von derselben Quelle,
     # deckt aber einen abgebrochenen oder verfaelschten Transport ab.
-    sha256sum -c --ignore-missing SHASUMS256.txt >/dev/null
-    mkdir -p "$APP_DIR/node"
-    tar -xJf "$FILE" -C "$APP_DIR/node" --strip-components=1
-  ) || die "Node konnte nicht installiert werden."
+    sha256sum -c --ignore-missing --quiet SHASUMS256.txt || exit 1
+    mkdir -p "$APP_DIR/node" || exit 1
+    tar -xJf "$FILE" -C "$APP_DIR/node" --strip-components=1 || exit 1
+  ) || { rm -rf "$TMP"; die "Node konnte nicht installiert werden."; }
   rm -rf "$TMP"
+  note "Pruefsumme stimmt (SHASUMS256.txt von nodejs.org)"
   NODE_BIN="$APP_DIR/node/bin/node"
 fi
 
