@@ -59,7 +59,7 @@ test("Ein abgelaufener Kopplungscode wird verständlich abgelehnt", async () => 
 });
 
 test("Kopplungscode aus dem Befehl: Schlüssel, Datenbank, Anmeldung bei DZPage", async () => {
-  const result = await runAdmin(["link", "--token", "dzp_pair_gueltig_0123456789"]);
+  const result = await runAdmin(["link", "--yes", "--token", "dzp_pair_gueltig_0123456789"]);
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /Verbunden mit dem DZPage-Konto TestKonto/);
 
@@ -81,7 +81,7 @@ test("Kopplungscode aus dem Befehl: Schlüssel, Datenbank, Anmeldung bei DZPage"
 });
 
 test("Schon gekoppelt: nichts überschreiben, ausser ausdrücklich gewollt", async () => {
-  const again = await runAdmin(["link", "--token", "dzp_pair_gueltig_0123456789"]);
+  const again = await runAdmin(["link", "--yes", "--token", "dzp_pair_gueltig_0123456789"]);
   assert.equal(again.code, 3);
   assert.match(again.output, /schon mit DZPage verbunden \(Konto TestKonto\)/);
   assert.equal(stub.calls.register.length, 1);
@@ -90,7 +90,7 @@ test("Schon gekoppelt: nichts überschreiben, ausser ausdrücklich gewollt", asy
 test("Link und Bestätigung im Browser, wie bei einem Fernseher-Login", async () => {
   const before = stub.calls.register.length;
   let decided = false;
-  const result = await runAdmin(["link", "--force"], {
+  const result = await runAdmin(["link", "--yes", "--force"], {
     onOutput(output) {
       // Sobald der Link im Terminal steht, bestaetigt der Mensch auf dzpage.com.
       if (!decided && output.includes("Warte auf Bestätigung")) {
@@ -113,7 +113,7 @@ test("Link und Bestätigung im Browser, wie bei einem Fernseher-Login", async ()
 
 test("Abgelehnte Bestätigung koppelt nicht", async () => {
   let decided = false;
-  const result = await runAdmin(["link", "--force"], {
+  const result = await runAdmin(["link", "--yes", "--force"], {
     onOutput(output) {
       if (!decided && output.includes("Warte auf Bestätigung")) {
         decided = true;
@@ -123,4 +123,45 @@ test("Abgelehnte Bestätigung koppelt nicht", async () => {
   });
   assert.equal(result.code, 1);
   assert.match(result.output, /abgelehnt/);
+});
+
+/**
+ * Prueferbefund: DZPage gibt den Schluessel genau einmal heraus. Scheiterte
+ * danach nur die Anmeldung, war er bisher verloren und die Kopplung auch.
+ */
+test("Scheitert nur die Anmeldung, bleibt der Schlüssel und der nächste Aufruf holt sie nach", async () => {
+  stub.pairing.tokens.add("dzp_pair_zweiter_0123456789");
+  stub.state.failRegister = 1;
+  const before = stub.calls.register.length;
+  const first = await runAdmin(["link", "--yes", "--force", "--token", "dzp_pair_zweiter_0123456789"]);
+  assert.equal(first.code, 1);
+  assert.match(first.output, /Schlüssel erhalten, aber die Anmeldung bei DZPage schlug fehl/);
+  assert.equal(config().dzpage.key, stub.key, "der Schluessel ist gespeichert");
+
+  // Die Panel-ID der vorigen Tests loeschen, damit der Zustand dem echten
+  // Abbruch entspricht: Schluessel da, Anmeldung fehlt.
+  const { openDatabase } = await import("../src/db/index.js");
+  const db = await openDatabase(config().database);
+  await db.run("DELETE FROM settings WHERE name = 'dzpage_panel_id'", []);
+  await db.close();
+
+  const second = await runAdmin(["link"]);
+  assert.equal(second.code, 0, second.output);
+  assert.match(second.output, /Hole sie nach/);
+  assert.match(second.output, /Verbunden mit dem DZPage-Konto TestKonto/);
+  assert.equal(stub.calls.register.length, before + 1);
+});
+
+test("Eine Antwort, die nicht wie ein Schlüssel aussieht, wird nicht gespeichert", async () => {
+  const { isPanelKey } = await import("../src/dzpage/pairing.js");
+  assert.equal(isPanelKey("dzp_panel_0123456789abcdef0123"), true);
+  assert.equal(isPanelKey("dzp_panel_kurz"), false);
+  assert.equal(isPanelKey("dzp_panel_0123456789abcdef\r\nX-Evil: 1"), false);
+  assert.equal(isPanelKey("irgendwas"), false);
+});
+
+test("--token ohne Wert fällt nicht still auf den Link zurück", async () => {
+  const result = await runAdmin(["link", "--yes", "--force", "--token"]);
+  assert.equal(result.code, 1);
+  assert.match(result.output, /fehlt der Kopplungscode/);
 });

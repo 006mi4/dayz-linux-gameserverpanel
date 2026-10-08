@@ -114,9 +114,10 @@ export class Client {
  * Standhalter fuer die Panel-API von DZPage. Antwortet wie das Original,
  * inklusive der Fehlercodes aus src/lib/panel/api.ts.
  */
-export async function startDzpageStub({ key = "dzp_panel_testkey", account = "TestKonto" } = {}) {
+export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef", account = "TestKonto" } = {}) {
   const calls = { register: [], heartbeat: [], servers: [], unregister: [], results: [], polls: 0, pair: [] };
-  const state = { revoked: false, unknownPanel: false };
+  /** failRegister: die naechsten n Anmeldungen scheitern mit 503 (DZPage kurz weg). */
+  const state = { revoked: false, unknownPanel: false, failRegister: 0 };
   const queue = [];
   /**
    * Kopplung wie auf DZPage: Einmal-Codes (dzp_pair_...) und Geraete-Codes.
@@ -179,6 +180,10 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
       const payload = body ? JSON.parse(body) : {};
 
       if (path === "/api/panel/v1/register") {
+        if (state.failRegister > 0) {
+          state.failRegister -= 1;
+          return send(503, { ok: false, error: "unavailable" });
+        }
         calls.register.push(payload);
         return send(200, { ok: true, panelId: "panel123456", account, heartbeatSeconds: 60 });
       }

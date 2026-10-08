@@ -414,21 +414,38 @@ note "Protokoll: sudo dzpage-panel logs   Zustand: sudo dzpage-panel status"
 # bei der Selbstaktualisierung (kein Terminal, und gekoppelt ist dann laengst).
 LINKED=0
 grep -q '"key": *"dzp_panel_' "$CONFIG_DIR/panel.json" 2>/dev/null && LINKED=1
-if [ -n "$PAIR_TOKEN" ]; then
+TERMINAL=0
+[ -t 1 ] && (exec < /dev/tty) 2>/dev/null && TERMINAL=1
+
+# Strg+C waehrend des Wartens soll nur die Kopplung abbrechen, nicht den Rest
+# dieses Skripts. Ein Handler (statt ignorieren) gilt nur hier: Das Kind
+# bekommt das Signal wie gewohnt, dieses Skript laeuft danach weiter.
+pair() {
+  local rc=0
+  trap 'printf "\n"' INT
+  "$CLI" link "$@" || rc=$?
+  trap - INT
+  return "$rc"
+}
+
+if [ "$LINKED" -eq 1 ]; then
+  # Derselbe Befehl ein zweites Mal soll nicht neu koppeln (zweiter Schluessel,
+  # oder "nicht verbunden", sobald der Code verbraucht ist).
+  [ -n "$PAIR_TOKEN" ] && note "Schon mit DZPage verbunden. Neu verbinden: sudo dzpage-panel link --force"
+elif [ -n "$PAIR_TOKEN" ]; then
   say "Mit DZPage verbinden"
-  if "$CLI" link --token "$PAIR_TOKEN" --force; then
+  if pair --token "$PAIR_TOKEN"; then
     LINKED=1
+  elif [ "$TERMINAL" -eq 1 ] && [ "$LINK" -eq 1 ]; then
+    note "Dann mit Link und Code:"
+    pair && LINKED=1 || warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
   else
     warn "Nicht verbunden. Spaeter mit Link und Code: sudo dzpage-panel link"
   fi
-elif [ "$LINK" -eq 1 ] && [ "$LINKED" -eq 0 ] && [ -t 1 ]; then
+elif [ "$LINK" -eq 1 ] && [ "$TERMINAL" -eq 1 ]; then
   say "Mit DZPage verbinden"
-  if "$CLI" link; then
-    LINKED=1
-  else
-    warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
-  fi
-elif [ "$LINKED" -eq 0 ]; then
+  pair && LINKED=1 || warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+else
   say "Mit DZPage verbinden"
   note "sudo dzpage-panel link"
 fi
@@ -436,8 +453,7 @@ fi
 # ---------------------------------------------------------------- Steam
 # Ohne Steam-Konto mit DayZ laedt kein Server herunter. Das Passwort tippt der
 # Mensch direkt in SteamCMD; es geht weder durch dieses Skript noch zu DZPage.
-if [ "$LINKED" -eq 1 ] && { [ "$FIRST_INSTALL" -eq 1 ] || [ -n "$PAIR_TOKEN" ]; } \
-  && [ -t 1 ] && (exec < /dev/tty) 2>/dev/null; then
+if [ "$LINKED" -eq 1 ] && { [ "$FIRST_INSTALL" -eq 1 ] || [ -n "$PAIR_TOKEN" ]; } && [ "$TERMINAL" -eq 1 ]; then
   say "Steam"
   note "Ein DayZ-Server braucht ein Steam-Konto, das DayZ besitzt (anonym verweigert Steam den Download)."
   printf '  Steam-Kontoname (leer lassen, um es spaeter mit "sudo dzpage-panel steam-login <konto>" zu tun): '

@@ -44,6 +44,11 @@ export function isPairToken(value) {
   return PAIR_TOKEN_PATTERN.test(String(value ?? ""));
 }
 
+/** Was als Panel-Schluessel zurueckkommt, muss wie einer aussehen, bevor es gespeichert wird. */
+export function isPanelKey(value) {
+  return /^dzp_panel_[A-Za-z0-9]{16,128}$/.test(String(value ?? ""));
+}
+
 /** Weg 1: den Einmal-Code aus dem Installationsbefehl einloesen. */
 export async function redeemPairToken(config, token) {
   if (!isPairToken(token)) return { ok: false, code: "invalid_token" };

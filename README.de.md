@@ -61,8 +61,9 @@ curl -fsSL https://dzpage.com/panel/install.sh | sudo bash -s -- --pair dzp_pair
 
 Den fügst du ins Terminal deines Servers ein (SSH). Er installiert das Panel,
 verbindet es von selbst mit deinem DZPage-Konto und fragt am Ende nach dem
-Steam-Konto, das DayZ besitzt. Das war es. Der Kopplungscode gilt einmal und
-eine Stunde.
+Steam-Konto, das DayZ besitzt. Bevor es verbindet, zeigt das Terminal den
+Namen des DZPage-Kontos und fragt, ob das deins ist, so wie AirDrop vor dem
+Annehmen fragt. Das war es. Der Kopplungscode gilt einmal und 30 Minuten.
 
 Ohne diesen Befehl geht es auch:
 
@@ -506,7 +507,7 @@ sudo -u dzpage npm install --omit=dev --prefix /usr/lib/dzpage-panel mysql2
   Administrator gibt, öffnet nur der Einmal-Code aus dem Installer den lokalen
   Assistenten.
 - **Koppeln, ohne Geheimnisse abzutippen.** Der Kopplungscode im
-  Installationsbefehl gilt einmal und eine Stunde, der Code im Link 15 Minuten,
+  Installationsbefehl gilt einmal und 30 Minuten, der Code im Link 15 Minuten,
   und die Seite auf dzpage.com zeigt Name und Adresse der Maschine, bevor du
   bestätigst. Das Panel bekommt nie etwas anderes als seinen eigenen,
   widerrufbaren Schlüssel.

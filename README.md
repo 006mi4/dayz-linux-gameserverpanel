@@ -77,8 +77,9 @@ curl -fsSL https://dzpage.com/panel/install.sh | sudo bash -s -- --pair dzp_pair
 
 Paste it into the terminal of your server (SSH). It installs the panel, links
 it to your DZPage account on its own, and at the end asks for the Steam account
-that owns DayZ. That is all. The pairing code works once and expires after an
-hour.
+that owns DayZ. Before it links, the terminal shows the DZPage account name and
+asks whether that is yours, the same way AirDrop asks before it accepts. That
+is all. The pairing code works once and expires after 30 minutes.
 
 Without that command it works too:
 
@@ -505,7 +506,7 @@ sudo -u dzpage npm install --omit=dev --prefix /usr/lib/dzpage-panel mysql2
 - **A setup code instead of first come, first served.** Until an administrator
   exists, only the one-time code from the installer opens the local wizard.
 - **Pairing without typing secrets.** The pairing code in the install command
-  works once and expires after an hour; the link code expires after 15 minutes,
+  works once and expires after 30 minutes; the link code expires after 15 minutes,
   and the page on dzpage.com shows the machine’s name and address before you
   confirm. The panel never receives anything but its own revocable key.
 - **No shell in the interface.** Every action is a fixed, named operation;
