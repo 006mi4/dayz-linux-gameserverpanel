@@ -1,16 +1,16 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
 import { stripAnsi } from "../steam/pty.js";
 import { pick, readVdfBlock } from "../steam/vdf.js";
 import { ensureSteamCmd } from "../steam/steamcmd.js";
 import { STEAM_INFO_HOME } from "../paths.js";
-import { listServers, rconPassword, serverDir, updateServer } from "../store/servers.js";
+import { listServers, updateServer } from "../store/servers.js";
 import { getNumber, getSetting, KEYS, setSetting } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
-import { runtimeFor } from "../runtime/index.js";
-import { DAYZ_SERVER_APP_ID, provisionServer } from "./install.js";
+import { DAYZ_SERVER_APP_ID, installedBuildId, updateGameFiles } from "./install.js";
 import { log } from "../log.js";
+
+export { installedBuildId };
 
 /**
  * Update-Pruefung: Steht bei Steam eine neuere Fassung des DayZ-Servers als
@@ -46,17 +46,6 @@ const MAX_OUTPUT_BYTES = 512 * 1024;
 const BUILD_ID = /^\d{1,20}$/;
 
 /* ------------------------------------------------------------ Build-Nummern */
-
-/** Die Build-Nummer der installierten Spieldateien, oder null. */
-export function installedBuildId(id) {
-  try {
-    const file = join(serverDir(id), "game", "steamapps", `appmanifest_${DAYZ_SERVER_APP_ID}.acf`);
-    const state = readVdfBlock(readFileSync(file, "utf8"), "AppState");
-    return asBuildId(pick(state, "buildid"));
-  } catch {
-    return null;
-  }
-}
 
 function asBuildId(value) {
   return BUILD_ID.test(String(value ?? "")) ? String(value) : null;
@@ -213,46 +202,10 @@ export async function checkUpdates(app, { job = null, apply = false } = {}) {
   return { buildId: branch.buildId, outdated: outdated.map((s) => s.id), updated, failed };
 }
 
-/**
- * Spieldateien eines Servers erneuern. Laeuft er gerade, wird er angehalten und
- * danach wieder gestartet — DayZ kann seine eigenen Dateien nicht austauschen,
- * waehrend es sie geoeffnet hat.
- */
+/** Spieldateien eines Servers erneuern; Anhalten und Wiederanlaufen macht updateGameFiles. */
 async function applyUpdate(app, server, job, expectedBuild) {
-  const runtime = runtimeFor(server);
-  let wasRunning = false;
-  try {
-    wasRunning = (await runtime.status(server)).state === "running";
-  } catch (err) {
-    log.debug(`Zustand von ${server.id} vor der Aktualisierung nicht lesbar: ${err.message}`);
-  }
-
   job?.append(`${server.name}: aktualisiere auf Build ${expectedBuild}.`);
-  if (wasRunning) await runtime.stop(server);
-
-  const account = await getSetting(app.db, KEYS.steamAccount);
-  await updateServer(app.db, server.id, { install_state: "installing" });
-  try {
-    await provisionServer({
-      config: app.config,
-      server,
-      account,
-      job,
-      runtime,
-      rconPassword: rconPassword(server, app.config.secrets.encryption),
-    });
-  } catch (err) {
-    await updateServer(app.db, server.id, { install_state: "failed" });
-    if (wasRunning) await runtime.start(server).catch(() => undefined);
-    throw err;
-  }
-
-  await updateServer(app.db, server.id, {
-    install_state: "ready",
-    installed_at: Date.now(),
-    installed_build: installedBuildId(server.id),
-  });
-  if (wasRunning) await runtime.start(server);
+  const { wasRunning } = await updateGameFiles(app, server, job ?? undefined);
 
   await recordEvent(app.db, {
     kind: "update.applied",

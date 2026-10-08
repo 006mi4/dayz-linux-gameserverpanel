@@ -18,9 +18,18 @@ EnvironmentFile=-/var/lib/dzpage-panel/servers/%i/server.env
 ExecStart=/usr/lib/dzpage-panel/launch-server.sh %i
 Restart=on-failure
 RestartSec=10
+# 78 meldet launch-server.sh, wenn die Spieldateien fehlen. Das behebt kein
+# zweiter Versuch, also kein Neustart alle zehn Sekunden.
+RestartPreventExitStatus=78
+# DayZ beendet sich auf SIGINT so wie auf Strg+C: es speichert und geht. So
+# steht es auch in der Unit, die Bohemia im Wiki fuer Linux-Server zeigt.
+KillSignal=SIGINT
 # DayZ speichert beim Beenden; 45 Sekunden sind genug und verhindern, dass ein
 # haengender Server den Neustart blockiert.
 TimeoutStopSec=45
+# Ebenfalls aus der Bohemia-Unit: Mit dem Standardwert gehen einem vollen
+# Server die Dateideskriptoren aus.
+LimitNOFILE=100000
 
 PrivateTmp=yes
 ProtectSystem=strict

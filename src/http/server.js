@@ -75,8 +75,22 @@ function setCookie(res, name, value, { maxAge, secure, httpOnly = true, sameSite
   res.setHeader("set-cookie", list);
 }
 
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/**
+ * Den Proxy-Kopfzeilen glauben? Mit "trustProxy" in panel.json entscheidet der
+ * Betreiber selbst (sein Proxy kann auf einer anderen Maschine stehen). Die
+ * Einstellung aus https.sh gilt dagegen nur fuer Verbindungen von dieser
+ * Maschine: Caddy steht hier. Lauscht das Panel versehentlich nach aussen,
+ * koennte sonst jeder X-Forwarded-For setzen und die Drosselung umgehen.
+ */
+function trustsProxy(req, config) {
+  if (config.trustProxy) return true;
+  return Boolean(config.trustProxyEnv) && LOOPBACK.has(req.socket.remoteAddress || "");
+}
+
 function clientProtocol(req, config) {
-  if (config.trustProxy) {
+  if (trustsProxy(req, config)) {
     const forwarded = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
     if (forwarded) return forwarded;
   }
@@ -84,7 +98,7 @@ function clientProtocol(req, config) {
 }
 
 function clientIp(req, config) {
-  if (config.trustProxy) {
+  if (trustsProxy(req, config)) {
     const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
     if (forwarded) return forwarded.slice(0, 64);
   }
@@ -224,6 +238,24 @@ export class SetupState {
   constructor() {
     this.tokens = new Map();
     this.draft = {};
+    /** Assistenten-Kennungen, die den Einrichtungscode schon eingegeben haben. */
+    this.unlocked = new Set();
+  }
+
+  isUnlocked(rc) {
+    const id = rc.cookies["dzp_panel_setup"];
+    return Boolean(id) && this.tokens.has(id) && this.unlocked.has(id);
+  }
+
+  unlock(rc) {
+    const existing = rc.cookies["dzp_panel_setup"];
+    const id = existing && this.tokens.has(existing) ? existing : this.issue(rc);
+    this.unlocked.add(id);
+  }
+
+  /** Nach dem Anlegen des Administrators hat der Code ausgedient. */
+  lockAll() {
+    this.unlocked.clear();
   }
 
   tokenFor(rc) {
@@ -236,11 +268,17 @@ export class SetupState {
     const id = randomToken();
     const token = randomToken();
     this.tokens.set(id, token);
-    // Nur ein Assistent gleichzeitig: aeltere Kennungen wegwerfen, damit die
-    // Zuordnung nicht unbegrenzt waechst.
+    // Aeltere Kennungen wegwerfen, damit die Zuordnung nicht unbegrenzt
+    // waechst, aber nie eine freigeschaltete: Sonst koennte jeder, der den Port
+    // erreicht, mit ein paar Aufrufen ohne Cookie den Besitzer mitten im
+    // Assistenten wieder aussperren. Freigeschaltete gibt es nur so viele, wie
+    // jemand den richtigen Code eingegeben hat.
     if (this.tokens.size > 8) {
-      const oldest = this.tokens.keys().next().value;
-      if (oldest !== id) this.tokens.delete(oldest);
+      for (const candidate of this.tokens.keys()) {
+        if (candidate === id || this.unlocked.has(candidate)) continue;
+        this.tokens.delete(candidate);
+        break;
+      }
     }
     setCookie(rc.res, "dzp_panel_setup", id, { maxAge: 3600, secure: rc.secureCookies });
     rc.cookies["dzp_panel_setup"] = id;
@@ -262,6 +300,10 @@ function randomToken() {
  * kommt, das Panel uebernehmen. Existiert bereits ein Administrator, der
  * Assistent aber noch nicht fertig, fuehrt der Weg ueber die Anmeldung: das
  * ist keine Uebernahme, sondern die Fortsetzung durch den Eigentuemer.
+ *
+ * Davor, solange es keinen Administrator gibt, steht der Einrichtungscode.
+ * Ohne ihn gehoerte das Panel dem, der als Erster an den Port kommt.
+ * `route.unlocks` markiert die eine Seite, auf der man ihn eingibt.
  */
 async function passesAccessGate(rc, route) {
   if (route.access === "public") return true;
@@ -278,8 +320,13 @@ async function passesAccessGate(rc, route) {
       rc.notFound();
       return false;
     }
-    if (state.hasAdmin && !rc.user) {
+    if (state.hasAdmin) {
+      if (rc.user) return true;
       rc.redirect(`/login?next=${encodeURIComponent(rc.path)}`);
+      return false;
+    }
+    if (!route.unlocks && !rc.app.setup.isUnlocked(rc)) {
+      rc.redirect("/setup/unlock");
       return false;
     }
     return true;
@@ -410,4 +457,4 @@ export function createHttpServer(app) {
   return server;
 }
 
-export { setCookie };
+export { setCookie, trustsProxy };

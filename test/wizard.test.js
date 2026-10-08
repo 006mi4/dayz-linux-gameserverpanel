@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, statSync } from "node:fs";
-import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { Client, launchPanel, prepareEnv, readSetupCodeFile, startDzpageStub } from "../test-support/helper.js";
 
 /**
  * Der Assistent von Anfang bis Ende, ueber HTTP wie im Browser: Datenbank,
@@ -22,13 +23,74 @@ test.after(async () => {
   env.cleanup();
 });
 
-test("Startseite führt in den Assistenten", async () => {
+const intruder = new Client(panel.url);
+
+test("Startseite führt in den Assistenten, und der beginnt beim Einrichtungscode", async () => {
   await client.get("/");
   assert.equal(client.lastStatus, 303);
   assert.equal(client.lastLocation, "/setup");
 
   await client.get("/setup");
+  assert.equal(client.lastLocation, "/setup/unlock");
+});
+
+/**
+ * Ohne Code gehoerte das Panel dem, der zuerst an den Port kommt: Er legte den
+ * Administrator an und koennte sogar die Datenbank auf eine eigene MySQL
+ * umbiegen. Genau das war bis 0.3.x moeglich.
+ */
+test("Ohne Einrichtungscode bleibt der Assistent zu", async () => {
+  const codeFile = join(env.root, "etc", "setup-code");
+  assert.equal(existsSync(codeFile), true, "das Panel legt den Code beim Start an");
+  assert.equal(statSync(codeFile).mode & 0o777, 0o600);
+  assert.match(readSetupCodeFile(env), /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+
+  for (const path of ["/setup/database", "/setup/admin"]) {
+    await intruder.get(path);
+    assert.equal(intruder.lastStatus, 303, path);
+    assert.equal(intruder.lastLocation, "/setup/unlock", path);
+  }
+
+  // Auch ein Formular mit gueltigem CSRF-Wert kommt nicht durch: das Tor steht
+  // vor der Formularpruefung.
+  await intruder.get("/setup/unlock");
+  await intruder.post("/setup/database", { kind: "sqlite", action: "save", _csrf: intruder.csrf });
+  assert.equal(intruder.lastLocation, "/setup/unlock");
+  assert.equal(existsSync(env.configFile) && JSON.parse(readFileSync(env.configFile, "utf8")).database, null);
+
+  await intruder.get("/setup/unlock");
+  await intruder.submit("/setup/unlock", { code: "AAAA-BBBB-CCCC" });
+  assert.equal(intruder.lastStatus, 401);
+  assert.match(intruder.lastBody, /not right/);
+  await intruder.get("/setup/database");
+  assert.equal(intruder.lastLocation, "/setup/unlock");
+});
+
+test("Der richtige Code öffnet den Assistenten, auch klein und ohne Striche", async () => {
+  await client.get("/setup/unlock");
+  const typed = readSetupCodeFile(env).toLowerCase().replaceAll("-", " ");
+  await client.submit("/setup/unlock", { code: typed });
+  assert.equal(client.lastStatus, 303);
   assert.equal(client.lastLocation, "/setup/database");
+
+  await client.get("/setup/database");
+  assert.equal(client.lastStatus, 200);
+  // Wer den Code nicht kennt, bleibt weiter draussen.
+  await intruder.get("/setup/database");
+  assert.equal(intruder.lastLocation, "/setup/unlock");
+});
+
+/**
+ * Prueferbefund: Jeder Aufruf ohne Cookie bekam eine neue Assistenten-Kennung,
+ * ab der neunten flog die aelteste raus, und mit ihr die Freischaltung des
+ * Besitzers. Ein paar Anfragen von aussen reichten, um ihn auszusperren.
+ */
+test("Fremde Aufrufe ohne Cookie sperren den freigeschalteten Besitzer nicht aus", async () => {
+  for (let i = 0; i < 20; i += 1) {
+    await fetch(`${panel.url}/setup/unlock`, { redirect: "manual" });
+  }
+  await client.get("/setup/database");
+  assert.equal(client.lastStatus, 200, "der Besitzer bleibt im Assistenten");
 });
 
 test("Sicherheitskopfzeilen und keine Skripte", async () => {
@@ -133,6 +195,12 @@ test("Schritt 2: Administrator anlegen", async () => {
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
   assert.match(cookie, /Path=\//);
+
+  // Mit dem Administrator hat der Code ausgedient; ab jetzt fuehrt der Weg
+  // ueber die Anmeldung.
+  assert.equal(existsSync(join(env.root, "etc", "setup-code")), false);
+  await intruder.get("/setup/unlock");
+  assert.equal(intruder.lastLocation, "/login?next=%2Fsetup%2Funlock");
 });
 
 test("Schritt 3: Steam lässt sich überspringen", async () => {
@@ -240,6 +308,50 @@ test("Anmeldung wird gedrosselt", async () => {
   assert.equal(sawLock, true);
   panel.app.throttle.reset("127.0.0.1");
   panel.app.throttle.reset("::ffff:127.0.0.1");
+});
+
+test("Passwort ändern beendet die anderen Sitzungen", async () => {
+  const other = new Client(panel.url);
+  await other.get("/login");
+  await other.submit("/login", { username: "admin", password: "panel-passwort-1" });
+  assert.equal(other.lastLocation, "/");
+
+  await client.get("/login?lang=en");
+  if (client.lastStatus === 200) {
+    await client.submit("/login", { username: "admin", password: "panel-passwort-1" });
+  }
+  await client.get("/account");
+  assert.equal(client.lastStatus, 200);
+  assert.match(client.lastBody, /Signed in as admin/);
+
+  await client.submit("/account", { current: "falsch-falsch", password: "neues-passwort-1", password2: "neues-passwort-1" });
+  assert.equal(client.lastStatus, 401);
+  assert.match(client.lastBody, /current password is not right/);
+
+  await client.submit("/account", { current: "panel-passwort-1", password: "neues-passwort-1", password2: "anders" });
+  assert.equal(client.lastStatus, 400);
+
+  await client.submit("/account", {
+    current: "panel-passwort-1",
+    password: "neues-passwort-1",
+    password2: "neues-passwort-1",
+  });
+  assert.equal(client.lastStatus, 200);
+  assert.match(client.lastBody, /Password changed/);
+
+  // Die eigene Sitzung bleibt, die andere ist beendet.
+  await client.get("/");
+  assert.equal(client.lastStatus, 200);
+  await other.get("/");
+  assert.equal(other.lastLocation, "/login");
+
+  await other.get("/login");
+  await other.submit("/login", { username: "admin", password: "neues-passwort-1" });
+  assert.equal(other.lastLocation, "/");
+
+  // Der Sprachtest danach braucht die Anmeldemaske, also abgemeldet.
+  await client.get("/");
+  await client.submit("/logout", {});
 });
 
 test("Sprache lässt sich umschalten und bleibt", async () => {

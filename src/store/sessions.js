@@ -45,6 +45,15 @@ export async function deleteSession(db, id) {
   await db.run("DELETE FROM sessions WHERE id = ?", [id]);
 }
 
+/** Nach einem Passwortwechsel: alle anderen Sitzungen dieses Benutzers beenden. */
+export async function deleteOtherSessions(db, userId, keepId = null) {
+  if (keepId) {
+    await db.run("DELETE FROM sessions WHERE user_id = ? AND id <> ?", [userId, keepId]);
+  } else {
+    await db.run("DELETE FROM sessions WHERE user_id = ?", [userId]);
+  }
+}
+
 export async function purgeExpiredSessions(db) {
   const result = await db.run("DELETE FROM sessions WHERE expires_at <= ?", [Date.now()]);
   return result.changes;

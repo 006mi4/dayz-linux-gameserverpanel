@@ -8,18 +8,16 @@ import {
   findPortConflict,
   getServer,
   listServers,
-  rconPassword,
   serverDir,
   updateServer,
 } from "../store/servers.js";
-import { getSetting, getSettings, KEYS } from "../store/settings.js";
+import { getSettings, KEYS } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
 import { runtimeFor, RUNTIME_IDS } from "../runtime/index.js";
 import { availableRuntimes } from "../panel/installation.js";
-import { provisionServer } from "../servers/install.js";
-import { installedBuildId } from "../servers/updates.js";
+import { installedBuildId, updateGameFiles } from "../servers/install.js";
 import { writeServerFiles } from "../servers/config.js";
-import { registerServerWithDzpage } from "../dzpage/servers.js";
+import { registerServerWithDzpage, unregisterServerWithDzpage } from "../dzpage/servers.js";
 import {
   card,
   csrfInput,
@@ -253,6 +251,30 @@ function memoryRow(t, server, status) {
     </div>`;
 }
 
+/**
+ * Ob Spieler und der RCon-Arbeiter von DZPage den Server ueberhaupt erreichen.
+ * Gemessen wird nur die Firewall dieser Maschine; eine Firewall beim Hoster
+ * sieht das Panel nicht, deshalb steht der Hinweis darauf immer dabei.
+ */
+function firewallCell(t, server, firewall) {
+  const ports = [server.game_port, server.query_port, server.rcon_port].map(Number);
+  const list = ports.join(", ");
+  let state;
+  if (firewall.backend === "ufw" || firewall.backend === "firewalld") {
+    const closed = ports.filter((port) => !firewall.open.includes(port));
+    state = closed.length
+      ? pill("warn", t("servers.fw.closed", { backend: firewall.backend, ports: closed.join(", ") }))
+      : pill("ok", t("servers.fw.open", { backend: firewall.backend }));
+  } else if (firewall.backend === "docker") {
+    state = pill("ok", t("servers.fw.docker"));
+  } else if (firewall.backend === "none") {
+    state = pill("off", t("servers.fw.none"));
+  } else {
+    state = pill("off", t("servers.fw.unknown"));
+  }
+  return `${state}<div class="hint">${escapeHtml(t("servers.fw.hint", { ports: list }))}</div>`;
+}
+
 function updateCard(t, { server, installed, available, state }) {
   const rows = [
     [t("updates.installed"), `<span class="mono">${escapeHtml(installed || "—")}</span>`],
@@ -289,6 +311,7 @@ export async function detail(rc) {
   } catch (err) {
     logText = err.message;
   }
+  const firewall = await runtime.firewall(server).catch(() => ({ backend: "unknown", open: [] }));
 
   const settings = await getSettings(rc.app.db, [KEYS.updateAvailableBuild]);
   const installed = installedBuildId(server.id) ?? server.installed_build ?? null;
@@ -303,6 +326,7 @@ export async function detail(rc) {
 
   const rows = [
     [t("servers.ports"), `<span class="mono">${Number(server.game_port)} · ${Number(server.query_port)} · ${Number(server.rcon_port)}</span>`],
+    [t("servers.firewall"), firewallCell(t, server, firewall)],
     [t("servers.mission"), escapeHtml(server.mission)],
     [t("servers.maxPlayers"), String(Number(server.max_players))],
     [t("servers.limits"), `${Number(server.memory_max_mb)} MB · ${Number(server.cpu_quota)} %`],
@@ -466,8 +490,18 @@ export async function act(rc) {
         renderDeleteConfirm(rc, server);
         return;
       case "delete-confirm": {
+        // Waehrend SteamCMD in das Verzeichnis schreibt, waere ein Loeschen ein
+        // Wettlauf: die Installation legte danach Teile wieder an.
+        if (rc.app.jobs.current()?.running) throw new Error(t("servers.err.busy"));
         await runtime.destroy(server);
         rmSync(serverDir(server.id), { recursive: true, force: true });
+        // Bei DZPage abschalten, sonst stuende dort ein Server, den es nicht mehr
+        // gibt, und der RCon-Arbeiter versuchte weiter, ihn zu erreichen.
+        const unregistered = await unregisterServerWithDzpage(rc.app, server).catch((err) => ({
+          ok: false,
+          message: err.message,
+        }));
+        if (!unregistered.ok) log.warn(`Server ${server.id} bei DZPage nicht abgemeldet: ${unregistered.message}`);
         await deleteServer(rc.app.db, server.id);
         await recordEvent(rc.app.db, { kind: "server.delete", message: `Server ${server.name} entfernt` });
         rc.redirect("/servers");
@@ -555,25 +589,13 @@ async function switchRuntime(rc, server, target) {
 
 function startInstall(rc, server) {
   const app = rc.app;
-  const config = rc.config;
-  const password = rconPassword(server, config.secrets.encryption);
-  const runtime = runtimeFor(server);
-
   return app.jobs.start("server-install", async (job) => {
-    const account = await getSetting(app.db, KEYS.steamAccount);
-    await updateServer(app.db, server.id, { install_state: "installing" });
-    try {
-      await provisionServer({ config, server, account, job, runtime, rconPassword: password });
-    } catch (err) {
-      await updateServer(app.db, server.id, { install_state: "failed" });
-      throw err;
-    }
-    await updateServer(app.db, server.id, {
-      install_state: "ready",
-      installed_at: Date.now(),
-      installed_build: installedBuildId(server.id),
+    job.serverId = server.id;
+    const { wasRunning } = await updateGameFiles(app, server, job);
+    await recordEvent(app.db, {
+      kind: "server.install",
+      message: `${server.name} installiert${wasRunning ? " und neu gestartet" : ""}`,
     });
-    await recordEvent(app.db, { kind: "server.install", message: `${server.name} installiert` });
     return { serverId: server.id };
   });
 }

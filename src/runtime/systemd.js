@@ -1,5 +1,6 @@
 import { runHelper } from "./helper.js";
 import { serverDir, SERVER_ID_PATTERN } from "../store/servers.js";
+import { log } from "../log.js";
 
 /**
  * Laufzeit "systemd" — der Standardweg, weil er auf jedem Linux ohne
@@ -31,13 +32,48 @@ function normaliseState(show) {
   return "unknown";
 }
 
+function serverPorts(server) {
+  return [server.game_port, server.query_port, server.rcon_port].map((port) => String(Number(port)));
+}
+
+/** "backend=ufw\nopen=2302,27016" in eine Angabe fuer die Oberflaeche. */
+export function parseFirewall(text) {
+  const values = parseShow(text);
+  const backend = ["ufw", "firewalld", "none"].includes(values.backend) ? values.backend : "unknown";
+  const open = (values.open || "")
+    .split(",")
+    .map((port) => Number(port))
+    .filter((port) => Number.isInteger(port) && port > 0);
+  return { backend, open };
+}
+
 export function createSystemdRuntime() {
   return {
     id: "systemd",
 
-    /** Benutzer, Rechte und Grenzwerte fuer diesen Server einrichten. */
+    /**
+     * Benutzer, Rechte und Grenzwerte fuer diesen Server einrichten, dazu die
+     * Ports in der Firewall. Laeuft vor jedem Start und ist wiederholbar.
+     *
+     * Eine Firewall, die sich nicht oeffnen laesst, haelt den Start nicht auf:
+     * Der Server laeuft dann, ist von aussen aber nicht zu sehen, und genau
+     * das zeigt die Serverseite unter "Firewall" an.
+     */
     async prepare(server) {
       await runHelper(["prepare", server.id, String(server.memory_max_mb), String(server.cpu_quota)]);
+      try {
+        await runHelper(["firewall-open", server.id, ...serverPorts(server)]);
+      } catch (err) {
+        log.warn(`Firewall fuer ${server.id} nicht geoeffnet: ${err.message}`);
+      }
+    },
+
+    async firewall(server) {
+      try {
+        return parseFirewall(await runHelper(["firewall-status", server.id, ...serverPorts(server)]));
+      } catch (err) {
+        return { backend: "unknown", open: [], error: err.message };
+      }
     },
 
     async start(server) {
@@ -80,6 +116,9 @@ export function createSystemdRuntime() {
 
     async destroy(server) {
       await runHelper(["destroy", server.id]);
+      await runHelper(["firewall-close", server.id, ...serverPorts(server)]).catch((err) =>
+        log.warn(`Firewall fuer ${server.id} nicht geschlossen: ${err.message}`),
+      );
     },
 
     /** Wohin die Spieldateien gehoeren — bei beiden Laufzeiten derselbe Ort. */

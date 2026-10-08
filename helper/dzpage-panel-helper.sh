@@ -7,14 +7,17 @@
 # dieses kleine Programm: eine feste Liste benannter Operationen, jeder
 # Parameter gegen ein Muster geprueft, nichts Freies aus der Oberflaeche.
 #
-# Aufruf nur ueber sudo durch den Dienstbenutzer (Regel in
-# /etc/sudoers.d/dzpage-panel). Alles, was hier nicht steht, geht nicht.
+# Aufruf nur ueber den Socket dzpage-panel-helper.socket, den allein der
+# Dienstbenutzer oeffnen darf (Begruendung unten bei "--stdin"). Alles, was
+# hier nicht steht, geht nicht.
 #
 #   prepare <id> <speicherMB> <cpuProzent>   Benutzer, Rechte, Grenzwerte
 #   start|stop|restart|enable|disable <id>
 #   status <id>                              maschinenlesbare Zustandszeilen
 #   logs <id> <zeilen>
 #   destroy <id>                             Dienst weg, Benutzer weg
+#   firewall-open|firewall-close|firewall-status <id> <port>...
+#                                            UDP-Ports in ufw/firewalld
 #   self-update <vX.Y.Z>                     neue Panel-Fassung ausrollen
 #
 set -euo pipefail
@@ -153,6 +156,74 @@ cmd_logs() {
   journalctl -u "$unit" -n "$lines" --no-pager --output=short-iso 2>/dev/null || true
 }
 
+# Die Ports eines Spielservers in der Firewall der Maschine. Spieler und der
+# RCon-Arbeiter von DZPage kommen von aussen; ohne Freigabe sieht niemand den
+# Server, obwohl er laeuft. Nur ufw und firewalld werden angefasst: wer
+# iptables oder nftables von Hand pflegt, hat sich bewusst dafuer entschieden.
+#
+# Die ufw-Regeln tragen den Kommentar "dzpage-panel <id>", damit die
+# Deinstallation sie wiederfindet, ohne die Ports kennen zu muessen.
+fw_backend() {
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -1 | grep -q "Status: active"; then
+    echo ufw
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    echo firewalld
+  else
+    echo none
+  fi
+}
+
+fw_is_open() {
+  local backend=$1 port=$2
+  case "$backend" in
+    ufw) ufw status 2>/dev/null | grep -qE "^$port/udp +ALLOW" ;;
+    firewalld) firewall-cmd --quiet --query-port="$port/udp" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_firewall() {
+  local action=$1 id backend port open="" ports=()
+  id=$(need_id "${2:-}")
+  shift 2 || true
+  [ "$#" -ge 1 ] && [ "$#" -le 3 ] || die "ein bis drei Ports erwartet"
+  for port in "$@"; do ports+=("$(need_number "$port" 1024 65535)"); done
+  backend=$(fw_backend)
+
+  case "$backend:$action" in
+    ufw:open)
+      for port in "${ports[@]}"; do
+        ufw allow proto udp from any to any port "$port" comment "dzpage-panel $id" >/dev/null
+      done
+      ;;
+    ufw:close)
+      for port in "${ports[@]}"; do
+        ufw --force delete allow proto udp from any to any port "$port" >/dev/null 2>&1 || true
+      done
+      ;;
+    firewalld:open)
+      for port in "${ports[@]}"; do
+        firewall-cmd --quiet --permanent --add-port="$port/udp"
+        firewall-cmd --quiet --add-port="$port/udp"
+      done
+      ;;
+    firewalld:close)
+      for port in "${ports[@]}"; do
+        firewall-cmd --quiet --permanent --remove-port="$port/udp" >/dev/null 2>&1 || true
+        firewall-cmd --quiet --remove-port="$port/udp" >/dev/null 2>&1 || true
+      done
+      ;;
+  esac
+
+  echo "backend=$backend"
+  if [ "$backend" != none ]; then
+    for port in "${ports[@]}"; do
+      fw_is_open "$backend" "$port" && open="$open,$port"
+    done
+    echo "open=${open#,}"
+  fi
+}
+
 # Die neue Panel-Fassung rollt ein eigener Dienst aus, nicht dieser Aufruf:
 # Dabei startet das Panel neu, und ein Prozess, der am Socket des Panels haengt,
 # koennte danach nichts mehr melden. systemd-run bricht ausserdem ab, wenn schon
@@ -179,6 +250,9 @@ dispatch() {
     start|stop|restart|enable|disable) cmd_simple "$action" "$@" ;;
     status) cmd_status "$@" ;;
     logs) cmd_logs "$@" ;;
+    firewall-open) cmd_firewall open "$@" ;;
+    firewall-close) cmd_firewall close "$@" ;;
+    firewall-status) cmd_firewall status "$@" ;;
     self-update) cmd_self_update "$@" ;;
     *) die "unbekannte Operation: ${action:-(keine)}" ;;
   esac
@@ -212,9 +286,20 @@ if [ "${1:-}" = "--stdin" ]; then
   # Absichtlich ohne Anfuehrungszeichen: die Zeile soll in Woerter zerfallen.
   # Gefaehrliche Zeichen sind oben schon ausgeschlossen, Namensmuster gibt es
   # keine mehr.
+  #
+  # Die Unterschale laeuft mit "set -e", die aeussere fuer diesen einen Aufruf
+  # ohne: So bricht ein "die" in $(need_id ...) die Operation wirklich ab, ein
+  # gescheitertes systemctl meldet seinen Fehlercode, und trotzdem steht danach
+  # die Statuszeile da. Bis 0.3.x lief die Unterschale mit "set +e" und
+  # meldete jeden Fehler als Erfolg, ungueltige Parameter eingeschlossen.
+  # (Nicht als "( ... ) || status=$?": in einem ||-Ausdruck schaltet bash
+  # "set -e" auch innerhalb der Unterschale ab.)
+  set +e
   # shellcheck disable=SC2086
-  ( set +e; dispatch $line ) 2>&1
-  printf '#status:%s\n' "$?"
+  ( set -euo pipefail; dispatch $line ) 2>&1
+  status=$?
+  set -e
+  printf '#status:%s\n' "$status"
   exit 0
 fi
 

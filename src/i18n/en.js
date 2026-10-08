@@ -101,7 +101,7 @@ export const en = {
 
   "setup.dzpage.heading": "Connect to your DZPage account",
   "setup.dzpage.lede":
-    "Create a panel key at {url} and paste it here. The key may register servers and report status — nothing else. The panel only ever calls out to DZPage; no port needs to be opened.",
+    "Create a panel key at {url} and paste it here. The key may register servers and report status — nothing else. The panel only ever calls out to DZPage, so the panel itself needs no open port. Your game servers do: players and DZPage's RCon reach them from outside.",
   "setup.dzpage.key": "Panel key",
   "setup.dzpage.keyHint": "Starts with dzp_panel_ and is shown only once on DZPage.",
   "setup.dzpage.name": "Name of this panel",
@@ -122,9 +122,26 @@ export const en = {
   "setup.done.dzpage": "DZPage",
   "setup.done.finish": "Open dashboard",
 
+  "setup.unlock.heading": "Enter the setup code",
+  "setup.unlock.lede":
+    "Until an administrator exists, only the setup code opens the wizard. That way nobody else who reaches this port can take over the panel. The installer printed the code at the end.",
+  "setup.unlock.code": "Setup code",
+  "setup.unlock.hint": "Twelve letters and digits, dashes optional. It is also stored in {file}.",
+  "setup.unlock.wrong": "That code is not right.",
+
   "login.heading": "Sign in to the panel",
   "login.failed": "Wrong username or password.",
   "login.throttled": "Too many attempts. Try again in {minutes} minutes.",
+
+  "account.title": "Account",
+  "account.lede": "Signed in as {user}.",
+  "account.password": "Change password",
+  "account.current": "Current password",
+  "account.new": "New password",
+  "account.change": "Change password",
+  "account.changed": "Password changed. All other sessions have been signed out.",
+  "account.wrongCurrent": "The current password is not right.",
+  "account.forgotten": "Forgot it? On the machine itself, this sets a new one:",
 
   "dash.heading": "Dashboard",
   "dash.servers": "Game servers",
@@ -192,6 +209,14 @@ export const en = {
   "servers.registered": "registered",
   "servers.pid": "Process",
   "servers.restarts": "Restarts",
+  "servers.firewall": "Firewall",
+  "servers.fw.open": "open in {backend}",
+  "servers.fw.closed": "closed in {backend}: {ports}",
+  "servers.fw.docker": "published by Docker",
+  "servers.fw.none": "no local firewall active",
+  "servers.fw.unknown": "cannot be checked",
+  "servers.fw.hint":
+    "UDP {ports} must be reachable from outside, for players and for RCon from DZPage. If your host puts its own firewall in front (for example a Hetzner Cloud Firewall), open them there too.",
   "servers.state.heading": "State",
   "servers.state.running": "running",
   "servers.state.stopped": "stopped",
@@ -227,6 +252,7 @@ export const en = {
   "servers.err.memory": "Between 512 MB and 128 GB.",
   "servers.err.cpu": "Between 50 % and 3200 %.",
   "servers.err.action": "That did not work: {message}",
+  "servers.err.busy": "Another operation is still running. Wait until it is finished.",
 
   "updates.title": "Updates",
   "updates.lede":

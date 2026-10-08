@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -23,6 +23,19 @@ export function prepareEnv(name) {
       rmSync(root, { recursive: true, force: true });
     },
   };
+}
+
+/** Der Einrichtungscode, den das Panel beim Start neben panel.json ablegt. */
+export function readSetupCodeFile(env) {
+  return readFileSync(join(env.root, "etc", "setup-code"), "utf8").trim();
+}
+
+/** Assistent mit dem Einrichtungscode freischalten, wie es der Mensch am Browser tut. */
+export async function unlockSetup(client, env) {
+  await client.get("/setup/unlock");
+  await client.submit("/setup/unlock", { code: readSetupCodeFile(env) });
+  if (client.lastStatus !== 303) throw new Error(`Freischalten fehlgeschlagen (${client.lastStatus})`);
+  return client;
 }
 
 export async function launchPanel() {
@@ -102,9 +115,14 @@ export class Client {
  * inklusive der Fehlercodes aus src/lib/panel/api.ts.
  */
 export async function startDzpageStub({ key = "dzp_panel_testkey", account = "TestKonto" } = {}) {
-  const calls = { register: [], heartbeat: [], servers: [], results: [], polls: 0 };
+  const calls = { register: [], heartbeat: [], servers: [], unregister: [], results: [], polls: 0, pair: [] };
   const state = { revoked: false, unknownPanel: false };
   const queue = [];
+  /**
+   * Kopplung wie auf DZPage: Einmal-Codes (dzp_pair_...) und Geraete-Codes.
+   * Ein Geraete-Code wartet, bis der Test ihn mit approve()/deny() entscheidet.
+   */
+  const pairing = { tokens: new Set(["dzp_pair_gueltig_0123456789"]), devices: new Map(), issued: 0 };
 
   const server = createServer((req, res) => {
     let body = "";
@@ -114,6 +132,44 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(payload));
       };
+
+      // Kopplung kommt ohne Schluessel: genau dafuer ist sie da.
+      const pairPath = req.url.split("?")[0];
+      if (pairPath.startsWith("/api/panel/v1/pair/")) {
+        const payload = body ? JSON.parse(body) : {};
+        calls.pair.push({ path: pairPath, payload, authorization: req.headers.authorization ?? null });
+        if (pairPath === "/api/panel/v1/pair/redeem") {
+          if (!pairing.tokens.has(payload.token)) return send(400, { ok: false, error: "expired_token" });
+          pairing.tokens.delete(payload.token);
+          pairing.issued += 1;
+          return send(200, { ok: true, key, account });
+        }
+        if (pairPath === "/api/panel/v1/pair/start") {
+          const deviceCode = `geraet-${pairing.devices.size + 1}-${"x".repeat(40)}`;
+          const userCode = `K7QF-M2X${pairing.devices.size + 1}`;
+          pairing.devices.set(deviceCode, { status: "pending", userCode, request: payload });
+          return send(200, {
+            ok: true,
+            deviceCode,
+            userCode,
+            verificationUrl: `https://dzpage.example/link?code=${userCode}`,
+            expiresIn: 900,
+            interval: 2,
+          });
+        }
+        if (pairPath === "/api/panel/v1/pair/poll") {
+          const device = pairing.devices.get(payload.deviceCode);
+          if (!device) return send(200, { ok: true, status: "expired" });
+          if (device.status === "approved") {
+            pairing.devices.delete(payload.deviceCode);
+            pairing.issued += 1;
+            return send(200, { ok: true, status: "approved", key, account });
+          }
+          return send(200, { ok: true, status: device.status });
+        }
+        return send(404, { ok: false, error: "not_found" });
+      }
+
       const auth = req.headers.authorization || "";
       const given = auth.startsWith("Bearer ") ? auth.slice(7) : null;
       if (given !== key) return send(401, { ok: false, error: "invalid_key" });
@@ -132,7 +188,10 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
         return send(200, { ok: true, heartbeatSeconds: 60 });
       }
       if (path === "/api/panel/v1/servers") {
-        if (req.method === "DELETE") return send(200, { ok: true, removed: 1 });
+        if (req.method === "DELETE") {
+          calls.unregister.push(payload);
+          return send(200, { ok: true, removed: 1 });
+        }
         calls.servers.push(payload);
         return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7" });
       }
@@ -157,6 +216,13 @@ export async function startDzpageStub({ key = "dzp_panel_testkey", account = "Te
     key,
     calls,
     state,
+    pairing,
+    /** Den offenen Geraete-Code bestaetigen oder ablehnen, wie der Mensch auf dzpage.com. */
+    decideDevice(status) {
+      for (const device of pairing.devices.values()) {
+        if (device.status === "pending") device.status = status;
+      }
+    },
     /** Auftrag einreihen, den der naechste Long-Poll abholt. */
     queueJob(job) {
       queue.push({ createdAt: new Date().toISOString(), ...job });

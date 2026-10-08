@@ -27,6 +27,9 @@ bootstrap_main() {
 
   [ "$(id -u)" -eq 0 ] || die "Bitte als root ausfuehren (sudo)."
   [ -d /run/systemd/system ] || die "Dieses System benutzt kein systemd. Fuer andere Systeme gibt es den Docker-Weg (siehe README)."
+  # Vor dem Klonen pruefen, nicht erst in install.sh: DayZServer und SteamCMD
+  # gibt es nur fuer x86_64, auf allem anderen waere das Panel nutzlos.
+  [ "$(uname -m)" = "x86_64" ] || die "Diese Maschine ist $(uname -m). Den DayZ-Server gibt es nur fuer x86_64 (amd64)."
 
   say "Git bereitstellen"
   if ! command -v git >/dev/null 2>&1; then

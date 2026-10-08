@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { Client, launchPanel, prepareEnv, startDzpageStub, unlockSetup } from "../test-support/helper.js";
 
 /**
  * Spielserver: anlegen, Konfigurationsdateien schreiben, starten, stoppen,
@@ -16,13 +16,14 @@ import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-suppor
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const FAKE_HELPER = join(FIXTURES, "fake-helper.sh");
+const FAKE_STEAMCMD = join(FIXTURES, "fake-steamcmd.sh");
 
 const env = prepareEnv("servers");
 process.on("exit", () => env.cleanup());
 chmodSync(FAKE_HELPER, 0o755);
+chmodSync(FAKE_STEAMCMD, 0o755);
 
 process.env.DZPAGE_PANEL_HELPER = FAKE_HELPER;
-process.env.DZPAGE_PANEL_SUDO = "";
 // Docker gibt es in der Suite nicht — der Pfad ins Leere macht das eindeutig,
 // statt sich darauf zu verlassen, dass auf der Maschine keins installiert ist.
 process.env.DZPAGE_PANEL_DOCKER = join(env.root, "kein-docker");
@@ -48,6 +49,7 @@ test.after(async () => {
 });
 
 async function completeSetup() {
+  await unlockSetup(client, env);
   await client.get("/setup/database");
   await client.submit("/setup/database", { kind: "sqlite", action: "save" });
   await client.get("/setup/admin");
@@ -224,13 +226,24 @@ test("Server anlegen, steuern und löschen — über die Oberfläche", async () 
   assert.match(calls, new RegExp(`stop ${serverId}`));
   assert.match(calls, new RegExp(`enable ${serverId}`));
 
+  // Die Firewall wird vor jedem Start mit den drei Ports angesprochen, und die
+  // Seite sagt, was davon zu halten ist.
+  assert.match(helperCalls().join("\n"), new RegExp(`firewall-open ${serverId} 2302 27016 2306`));
+  await client.get(detailPath);
+  assert.match(client.lastBody, /no local firewall active/);
+  assert.match(client.lastBody, /UDP 2302, 27016, 2306 must be reachable/);
+
   // Löschen fragt nach und räumt dann auf
   await client.submit("/server/action", { id: serverId, action: "delete" });
   assert.match(client.lastBody, /Delete permanently/);
   await client.submit("/server/action", { id: serverId, action: "delete-confirm" });
   assert.equal(client.lastLocation, "/servers");
   assert.equal(existsSync(serverDir(serverId)), false);
-  assert.match(helperCalls().join("\n"), new RegExp(`destroy ${serverId}`));
+  const after = helperCalls().join("\n");
+  assert.match(after, new RegExp(`destroy ${serverId}`));
+  assert.match(after, new RegExp(`firewall-close ${serverId} 2302 27016 2306`));
+  // Bei DZPage abgemeldet, sonst stuende der Server dort weiter in der Liste.
+  assert.deepEqual(stub.calls.unregister, [{ panelId: "panel123456", serverId }]);
 });
 
 test("Aufträge von DZPage werden geprüft und ausgeführt", async () => {
@@ -244,9 +257,29 @@ test("Aufträge von DZPage werden geprüft und ausgeführt", async () => {
   });
   assert.match(serverId, /^[a-f0-9]{12}$/);
 
-  // Auftrag von DZPage: starten
-  stub.queueJob({ id: "job1", kind: "start", serverId });
+  // Ohne Spieldateien wird ein Start abgelehnt, statt "ausgefuehrt" zu melden,
+  // waehrend DayZ sofort wieder aussteigt.
+  stub.queueJob({ id: "job0", kind: "start", serverId });
   panel.app.poller.restart();
+  const refused = await waitFor(() => stub.calls.results.find((r) => r.jobId === "job0"));
+  assert.equal(refused.status, "failed");
+  assert.match(refused.detail, /nicht installiert/);
+
+  // Waehrend einer Installation heisst die Antwort "laeuft gerade", nicht
+  // "nicht installiert".
+  await panel.app.db.run("UPDATE servers SET install_state = 'installing' WHERE id = ?", [serverId]);
+  stub.queueJob({ id: "job0b", kind: "restart", serverId });
+  const busy = await waitFor(() => stub.calls.results.find((r) => r.jobId === "job0b"));
+  assert.equal(busy.status, "failed");
+  assert.match(busy.detail, /gerade installiert/);
+
+  // Auftrag von DZPage: starten. Entscheidend ist, dass DayZServer da liegt,
+  // nicht der Vermerk in der Datenbank (Server aus 0.3.x stehen oft auf
+  // "fehlgeschlagen" und haben ihre Dateien trotzdem).
+  await panel.app.db.run("UPDATE servers SET install_state = 'failed' WHERE id = ?", [serverId]);
+  mkdirSync(join(serverDir(serverId), "game"), { recursive: true });
+  writeFileSync(join(serverDir(serverId), "game", "DayZServer"), "#!/bin/sh\n", { mode: 0o755 });
+  stub.queueJob({ id: "job1", kind: "start", serverId });
   const result = await waitFor(() => stub.calls.results.find((r) => r.jobId === "job1"));
   assert.equal(result.status, "done");
   assert.match(helperCalls().join("\n"), new RegExp(`start ${serverId}`));
@@ -309,4 +342,137 @@ test("Ein misslungener Laufzeitwechsel lässt den Server heil", async () => {
   assert.equal(row.runtime, "systemd", "die Laufzeit darf erst nach dem Gelingen umgestellt werden");
   const calls = helperCalls().slice(before).join("\n");
   assert.doesNotMatch(calls, new RegExp(`destroy ${serverId}`), "nichts darf abgeraeumt worden sein");
+});
+
+/**
+ * Ein Weg fuer Schaltflaeche, DZPage-Auftrag und automatische Aktualisierung.
+ * Bis 0.3.x hielten nur die automatische Aktualisierung einen laufenden Server
+ * an; die Schaltflaeche und der Auftrag von dzpage.com tauschten die Dateien
+ * unter dem laufenden DayZ aus.
+ */
+test("Spieldateien aktualisieren hält einen laufenden Server an und startet ihn wieder", async () => {
+  const { setSetting, KEYS } = await import("../src/store/settings.js");
+  panel.app.config.steam = { ...panel.app.config.steam, steamcmdPath: FAKE_STEAMCMD };
+  await setSetting(panel.app.db, KEYS.steamAccount, "cached_konto");
+
+  const serverId = await createServer({
+    name: "Updateserver",
+    gamePort: "2702",
+    queryPort: "27416",
+    rconPort: "2706",
+    rconPassword: "rcon-geheim-6",
+    maxPlayers: "20",
+  });
+  const detailPath = `/server?id=${serverId}`;
+  const row = () => panel.app.db.get("SELECT install_state, installed_build FROM servers WHERE id = ?", [serverId]);
+
+  // Erstinstallation ueber die Oberflaeche
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "install" });
+  assert.match(client.lastLocation, /^\/job\?id=/);
+  const first = await panel.app.jobs.current().completion;
+  assert.equal(first.status, "ok", first.error);
+  assert.equal((await row()).install_state, "ready");
+  assert.equal((await row()).installed_build, "24041098");
+  assert.match(first.lines.join("\n"), /Bibliotheken von DayZServer/);
+  // Neu angelegte Server stehen auf "startet mit der Maschine"; nach der
+  // ersten Installation gibt es etwas zu starten, also wird die Unit aktiviert.
+  assert.match(helperCalls().join("\n"), new RegExp(`enable ${serverId}`));
+
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "start" });
+  await client.get(detailPath);
+  assert.match(client.lastBody, /running/);
+
+  // Aktualisierung von DZPage aus: anhalten, installieren, wieder starten.
+  const before = helperCalls().length;
+  stub.queueJob({ id: "job-update", kind: "update", serverId });
+  panel.app.poller.restart();
+  const result = await waitFor(() => stub.calls.results.find((r) => r.jobId === "job-update"), { timeoutMs: 30_000 });
+  panel.app.poller.stop();
+  assert.equal(result.status, "done", result.detail);
+  const calls = helperCalls().slice(before);
+  const stopAt = calls.indexOf(`stop ${serverId}`);
+  const prepareAt = calls.findIndex((line) => line.startsWith(`prepare ${serverId}`));
+  const startAt = calls.lastIndexOf(`start ${serverId}`);
+  assert.ok(stopAt >= 0 && stopAt < prepareAt && prepareAt < startAt, calls.join(" | "));
+
+  // Scheitert eine Aktualisierung, bleibt der Server benutzbar und laeuft
+  // mit den alten Dateien weiter. Frueher stand er danach auf "fehlgeschlagen",
+  // und der Start-Knopf war gesperrt.
+  await setSetting(panel.app.db, KEYS.steamAccount, "abgelaufen_konto");
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "install" });
+  const failed = await panel.app.jobs.current().completion;
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /Steam-Sitzung ist abgelaufen/);
+  assert.equal((await row()).install_state, "ready");
+  await client.get(detailPath);
+  assert.match(client.lastBody, /running/);
+});
+
+test("ldd-Ausgabe: fehlende Bibliotheken werden erkannt", async () => {
+  const { parseLddOutput } = await import("../src/servers/install.js");
+  const sample = [
+    "\tlinux-vdso.so.1 (0x00007ffd5b3f2000)",
+    "\tlibsteam_api.so => /srv/dayz/game/libsteam_api.so (0x00007f0e3c600000)",
+    "\tlibcurl.so.4 => not found",
+    "\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f0e3c200000)",
+    "\tlibcurl.so.4 => not found",
+  ].join("\n");
+  assert.deepEqual(parseLddOutput(sample), ["libcurl.so.4"]);
+  assert.deepEqual(parseLddOutput("\tnot a dynamic executable"), []);
+});
+
+/**
+ * Prueferbefunde zu updateGameFiles: Ein Server zwischen zwei Startversuchen
+ * ("starting") wird ebenfalls angehalten, und ein Fehler NACH dem Download
+ * laesst ihn nicht mit Dateien wieder anlaufen, die es so nicht mehr gibt.
+ */
+test("Aktualisierung: abstürzender Server wird angehalten, Fehler nach dem Download lässt ihn aus", async () => {
+  const { setSetting, KEYS } = await import("../src/store/settings.js");
+  panel.app.config.steam = { ...panel.app.config.steam, steamcmdPath: FAKE_STEAMCMD };
+  await setSetting(panel.app.db, KEYS.steamAccount, "cached_konto");
+
+  const serverId = await createServer({
+    name: "Absturzserver",
+    gamePort: "2802",
+    queryPort: "27516",
+    rconPort: "2806",
+    rconPassword: "rcon-geheim-7",
+    maxPlayers: "20",
+  });
+  const detailPath = `/server?id=${serverId}`;
+  const stateFile = join(process.env.DZPANEL_FAKE_STATE, `${serverId}.state`);
+  const failFlag = join(process.env.DZPANEL_FAKE_STATE, "fail-prepare");
+
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "install" });
+  assert.equal((await panel.app.jobs.current().completion).status, "ok");
+
+  // systemd zwischen zwei Startversuchen: auch das muss vor dem Download weg.
+  writeFileSync(stateFile, "starting\n");
+  let before = helperCalls().length;
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "install" });
+  assert.equal((await panel.app.jobs.current().completion).status, "ok");
+  let calls = helperCalls().slice(before);
+  assert.ok(calls.includes(`stop ${serverId}`), calls.join(" | "));
+  assert.ok(calls.lastIndexOf(`start ${serverId}`) > calls.indexOf(`stop ${serverId}`), calls.join(" | "));
+
+  // Jetzt scheitert ein Schritt nach dem Download.
+  writeFileSync(stateFile, "running\n");
+  writeFileSync(failFlag, "1\n");
+  before = helperCalls().length;
+  await client.get(detailPath);
+  await client.submit("/server/action", { id: serverId, action: "install" });
+  const failed = await panel.app.jobs.current().completion;
+  rmSync(failFlag);
+  assert.equal(failed.status, "failed");
+  assert.match(failed.lines.join("\n"), /bleibt angehalten/);
+  calls = helperCalls().slice(before);
+  assert.ok(calls.includes(`stop ${serverId}`), calls.join(" | "));
+  assert.equal(calls.includes(`start ${serverId}`), false, "mit halb ausgetauschten Dateien kein Neustart");
+  const row = await panel.app.db.get("SELECT install_state FROM servers WHERE id = ?", [serverId]);
+  assert.equal(row.install_state, "failed");
 });

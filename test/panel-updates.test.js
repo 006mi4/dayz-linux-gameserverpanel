@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { Client, launchPanel, prepareEnv, startDzpageStub, unlockSetup } from "../test-support/helper.js";
 
 /**
  * Die Aktualisierung des Panels selbst.
@@ -159,6 +159,7 @@ test("Eine ältere oder gleiche Fassung wird nicht eingespielt", async () => {
 /* -------------------------------------------------------- Über die Oberfläche */
 
 async function completeSetup() {
+  await unlockSetup(client, env);
   await client.get("/setup/database");
   await client.submit("/setup/database", { kind: "sqlite", action: "save" });
   await client.get("/setup/admin");

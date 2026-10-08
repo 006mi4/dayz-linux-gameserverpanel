@@ -11,9 +11,22 @@ import { createUpdateWatcher } from "./servers/updates.js";
 import { announceSelfUpdateResult, createPanelUpdateWatcher, markBootSuccessful } from "./panel/updates.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
 import { trimEvents } from "./store/events.js";
-import { DATA_DIR } from "./paths.js";
+import { countUsers } from "./store/users.js";
+import { ensureSetupCode } from "./auth/setupcode.js";
+import { DATA_DIR, SETUP_CODE_FILE } from "./paths.js";
 import { PANEL_VERSION } from "./version.js";
 import { log } from "./log.js";
+
+async function hasAdministrator(app) {
+  if (!app.db) return false;
+  try {
+    return (await countUsers(app.db)) > 0;
+  } catch {
+    // Eine eingerichtete, aber kaputte Datenbank ist ein Betriebsfehler und
+    // kein Grund, einen Einrichtungscode auszugeben.
+    return true;
+  }
+}
 
 /**
  * Start des Panels. Als Funktion und nicht nur als Skript, damit die Tests
@@ -49,6 +62,20 @@ export async function startPanel({ port, bind } = {}) {
     await announceSelfUpdateResult(app).catch((err) => log.warn(`Ergebnis der Aktualisierung: ${err.message}`));
   }
 
+  // Ohne Administrator oeffnet nur der Einrichtungscode den Assistenten. Er
+  // entsteht vor dem ersten Lauschen: install.sh wartet auf /health und gibt
+  // ihn danach aus, und dann muss er schon dastehen. Ins Protokoll kommt nur,
+  // wo er liegt.
+  let setupOpen = false;
+  if (!app.databaseBroken && !(await hasAdministrator(app))) {
+    try {
+      ensureSetupCode();
+      setupOpen = true;
+    } catch (err) {
+      log.error(`Einrichtungscode nicht anlegbar (${SETUP_CODE_FILE}): ${err.message}`);
+    }
+  }
+
   const server = createHttpServer(app);
   const listenPort = port ?? config.port;
   const listenHost = bind ?? config.bind;
@@ -64,7 +91,7 @@ export async function startPanel({ port, bind } = {}) {
   const actual = server.address();
   const url = `http://${listenHost.includes(":") ? `[${listenHost}]` : listenHost}:${actual.port}`;
   log.info(`DZPage Panel ${PANEL_VERSION} hört auf ${url}`);
-  if (!config.database) log.info(`Einrichtung offen — Assistent unter ${url}/setup`);
+  if (setupOpen) log.info(`Einrichtung offen: Assistent unter ${url}/setup, Einrichtungscode in ${SETUP_CODE_FILE}`);
 
   app.heartbeat.start();
   app.poller.start();

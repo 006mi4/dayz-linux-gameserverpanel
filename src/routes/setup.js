@@ -7,7 +7,9 @@ import { createSession } from "../store/sessions.js";
 import { getSetting, KEYS, setSetting } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
 import { MIN_PASSWORD_LENGTH } from "../auth/password.js";
+import { clearSetupCode, ensureSetupCode, matchesSetupCode } from "../auth/setupcode.js";
 import { csrfInput, escapeHtml, field, notice, stepper } from "../http/html.js";
+import { SETUP_CODE_FILE } from "../paths.js";
 import { log } from "../log.js";
 
 /**
@@ -26,6 +28,80 @@ function page(rc, { step, title, body }) {
 
 export async function index(rc) {
   const progress = await rc.app.setupProgress();
+  rc.redirect(progress.next);
+}
+
+/* ------------------------------------------------------- Einrichtungscode */
+
+function unlockForm(rc, { error = null } = {}) {
+  const t = rc.t;
+  return `
+    <h1>${escapeHtml(t("setup.unlock.heading"))}</h1>
+    <p class="lede">${escapeHtml(t("setup.unlock.lede"))}</p>
+    ${error ? notice("error", error) : ""}
+    <form method="post" action="/setup/unlock">
+      ${csrfInput(rc.csrf)}
+      ${field({
+        name: "code",
+        label: t("setup.unlock.code"),
+        hint: t("setup.unlock.hint", { file: SETUP_CODE_FILE }),
+        required: true,
+      })}
+      <div class="actions"><button class="primary" type="submit">${escapeHtml(t("common.next"))}</button></div>
+    </form>
+    <p class="hint"><code>sudo cat ${escapeHtml(SETUP_CODE_FILE)}</code></p>`;
+}
+
+function unlockPage(rc, status, options) {
+  rc.page(status, rc.t("setup.unlock.heading"), `<div class="card">${unlockForm(rc, options)}</div>`, {
+    nav: false,
+  });
+}
+
+export async function unlock(rc) {
+  const progress = await rc.app.setupProgress();
+  // Mit Administrator gibt es nichts mehr freizuschalten: weiter mit der
+  // Anmeldung, die das Zugangstor fuer diesen Fall schon verlangt hat.
+  if (progress.hasAdmin || rc.app.setup.isUnlocked(rc)) {
+    rc.redirect(progress.next);
+    return;
+  }
+  // Fehlt die Datei (geloescht, oder das Panel konnte sie beim Start nicht
+  // anlegen), entsteht hier ein neuer Code. Sonst gaebe es keinen Weg hinein.
+  ensureSetupCode();
+
+  if (rc.method === "GET") {
+    unlockPage(rc, 200);
+    return;
+  }
+
+  // Nur je Adresse gedrosselt, nicht insgesamt: knapp 60 Bit lassen sich auch
+  // von vielen Adressen aus nicht durchprobieren, und eine Gesamtsperre wuerde
+  // jedem, der den Port erreicht, erlauben, den Besitzer auszusperren.
+  const throttle = rc.app.throttle;
+  const own = `setup-code:${rc.ip || "unknown"}`;
+  const state = throttle.check(own);
+  if (state.locked) {
+    unlockPage(rc, 429, {
+      error: rc.t("login.throttled", { minutes: Math.ceil(state.retryAfterMs / 60000) }),
+    });
+    return;
+  }
+
+  if (!matchesSetupCode(rc.form.get("code"))) {
+    const after = throttle.fail(own);
+    log.warn("Falscher Einrichtungscode", { ip: rc.ip, locked: after.locked });
+    unlockPage(rc, 401, {
+      error: after.locked
+        ? rc.t("login.throttled", { minutes: Math.ceil(after.retryAfterMs / 60000) })
+        : rc.t("setup.unlock.wrong"),
+    });
+    return;
+  }
+
+  throttle.reset(own);
+  rc.app.setup.unlock(rc);
+  log.info("Assistent mit dem Einrichtungscode freigeschaltet");
   rc.redirect(progress.next);
 }
 
@@ -206,6 +282,9 @@ export async function admin(rc) {
   }
 
   const user = await createUser(rc.app.db, { username: nameCheck.username, password });
+  // Ab jetzt fuehrt der Weg ueber die Anmeldung; der Code hat ausgedient.
+  clearSetupCode();
+  rc.app.setup.lockAll();
   const session = await createSession(rc.app.db, {
     userId: user.id,
     ip: rc.ip,

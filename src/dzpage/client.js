@@ -34,15 +34,17 @@ export class DzpageClient {
    * Eine Anfrage an die Panel-API. Der Long-Poll braucht eine laengere Frist
    * als der Rest — deshalb ist sie hier einstellbar statt fest.
    */
-  async request(method, path, body = null, { timeoutMs = TIMEOUT_MS, signal } = {}) {
-    if (!this.hasKey) return { ok: false, code: "missing_key" };
+  async request(method, path, body = null, { timeoutMs = TIMEOUT_MS, signal, anonymous = false } = {}) {
+    // Ohne Schluessel geht nur die Kopplung: Sie ist genau der Weg, auf dem
+    // ein Panel seinen Schluessel erst bekommt.
+    if (!anonymous && !this.hasKey) return { ok: false, code: "missing_key" };
 
     let response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
         headers: {
-          authorization: `Bearer ${this.key}`,
+          ...(anonymous ? {} : { authorization: `Bearer ${this.key}` }),
           ...(body === null ? {} : { "content-type": "application/json" }),
           accept: "application/json",
           "user-agent": `dzpage-panel/${PANEL_VERSION}`,
@@ -63,6 +65,7 @@ export class DzpageClient {
     }
 
     if (response.ok && payload?.ok) return { ok: true, ...payload };
+    if (response.status === 429) return { ok: false, code: "rate_limited" };
     if (response.status === 401 || response.status === 403) {
       return { ok: false, code: payload?.error === "revoked" ? "revoked" : payload?.error || "invalid_key" };
     }

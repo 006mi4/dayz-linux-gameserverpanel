@@ -10,6 +10,12 @@ export const DATA_DIR = process.env.DZPAGE_PANEL_DATA_DIR || "/var/lib/dzpage-pa
 
 export const CONFIG_FILE = join(CONFIG_DIR, "panel.json");
 
+/**
+ * Einmaliger Einrichtungscode. Solange es keinen Administrator gibt, oeffnet
+ * nur er den Assistenten; install.sh gibt ihn am Ende aus.
+ */
+export const SETUP_CODE_FILE = join(CONFIG_DIR, "setup-code");
+
 /** Spieldateien je Server. Laufzeitwechsel systemd/Docker aendert den Ort nicht. */
 export const SERVERS_DIR = join(DATA_DIR, "servers");
 

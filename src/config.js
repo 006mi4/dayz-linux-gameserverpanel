@@ -65,6 +65,14 @@ export function loadConfig({ file = CONFIG_FILE, generateSecrets = true } = {}) 
   if (Number.isInteger(portOverride) && portOverride > 0 && portOverride < 65536) config.port = portOverride;
   if (process.env.DZPAGE_PANEL_BIND) config.bind = process.env.DZPAGE_PANEL_BIND;
   if (process.env.DZPAGE_BASE_URL) config.dzpage.baseUrl = process.env.DZPAGE_BASE_URL;
+  // Setzt die HTTPS-Einrichtung (https.sh) als Ergaenzung der systemd-Unit,
+  // sobald Caddy davorsteht. Ohne das saehe das Panel jede Anfrage als
+  // http von 127.0.0.1, und die Herkunftspruefung wiese jedes Formular ab.
+  // Nicht aufzaehlbar, damit saveConfig es nicht in panel.json festschreibt:
+  // Schaltet jemand HTTPS wieder ab, soll die Einstellung mit verschwinden.
+  if (process.env.DZPAGE_PANEL_TRUST_PROXY === "1") {
+    Object.defineProperty(config, "trustProxyEnv", { value: true, enumerable: false });
+  }
 
   validate(config);
 

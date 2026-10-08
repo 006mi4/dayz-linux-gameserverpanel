@@ -102,7 +102,7 @@ export const de = {
 
   "setup.dzpage.heading": "Mit dem DZPage-Konto verbinden",
   "setup.dzpage.lede":
-    "Erstelle unter {url} einen Panel-Schlüssel und trage ihn hier ein. Der Schlüssel darf Server registrieren und Zustand melden — mehr nicht. Das Panel ruft immer nur bei DZPage an; es muss kein Port geöffnet werden.",
+    "Erstelle unter {url} einen Panel-Schlüssel und trage ihn hier ein. Der Schlüssel darf Server registrieren und Zustand melden — mehr nicht. Das Panel ruft immer nur bei DZPage an, für das Panel selbst muss also kein Port geöffnet werden. Für die Spielserver schon: Spieler und das RCon von DZPage erreichen sie von außen.",
   "setup.dzpage.key": "Panel-Schlüssel",
   "setup.dzpage.keyHint": "Beginnt mit dzp_panel_ und wird auf DZPage nur einmal angezeigt.",
   "setup.dzpage.name": "Name dieses Panels",
@@ -123,9 +123,26 @@ export const de = {
   "setup.done.dzpage": "DZPage",
   "setup.done.finish": "Zur Übersicht",
 
+  "setup.unlock.heading": "Einrichtungscode eingeben",
+  "setup.unlock.lede":
+    "Solange es keinen Administrator gibt, öffnet nur der Einrichtungscode den Assistenten. So kann niemand sonst, der diesen Port erreicht, das Panel übernehmen. Der Installer hat den Code am Ende ausgegeben.",
+  "setup.unlock.code": "Einrichtungscode",
+  "setup.unlock.hint": "Zwölf Buchstaben und Ziffern, Bindestriche sind egal. Er steht auch in {file}.",
+  "setup.unlock.wrong": "Dieser Code stimmt nicht.",
+
   "login.heading": "Am Panel anmelden",
   "login.failed": "Benutzername oder Passwort ist falsch.",
   "login.throttled": "Zu viele Versuche. Bitte in {minutes} Minuten erneut versuchen.",
+
+  "account.title": "Konto",
+  "account.lede": "Angemeldet als {user}.",
+  "account.password": "Passwort ändern",
+  "account.current": "Aktuelles Passwort",
+  "account.new": "Neues Passwort",
+  "account.change": "Passwort ändern",
+  "account.changed": "Passwort geändert. Alle anderen Sitzungen sind abgemeldet.",
+  "account.wrongCurrent": "Das aktuelle Passwort stimmt nicht.",
+  "account.forgotten": "Vergessen? Direkt auf der Maschine setzt dieser Befehl ein neues:",
 
   "dash.heading": "Übersicht",
   "dash.servers": "Spielserver",
@@ -195,6 +212,14 @@ export const de = {
   "servers.registered": "angemeldet",
   "servers.pid": "Prozess",
   "servers.restarts": "Neustarts",
+  "servers.firewall": "Firewall",
+  "servers.fw.open": "in {backend} freigegeben",
+  "servers.fw.closed": "in {backend} gesperrt: {ports}",
+  "servers.fw.docker": "von Docker freigegeben",
+  "servers.fw.none": "keine lokale Firewall aktiv",
+  "servers.fw.unknown": "nicht prüfbar",
+  "servers.fw.hint":
+    "UDP {ports} müssen von außen erreichbar sein, für die Spieler und für das RCon von DZPage. Steht beim Hoster eine eigene Firewall davor (etwa die Hetzner Cloud Firewall), dort ebenfalls freigeben.",
   "servers.state.heading": "Zustand",
   "servers.state.running": "läuft",
   "servers.state.stopped": "gestoppt",
@@ -230,6 +255,7 @@ export const de = {
   "servers.err.memory": "Zwischen 512 MB und 128 GB.",
   "servers.err.cpu": "Zwischen 50 % und 3200 %.",
   "servers.err.action": "Das hat nicht geklappt: {message}",
+  "servers.err.busy": "Es läuft noch ein anderer Vorgang. Bitte warten, bis er fertig ist.",
 
   "updates.title": "Aktualisierungen",
   "updates.lede":

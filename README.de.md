@@ -14,8 +14,11 @@ wieder hochholen.
 
 ## Was du brauchst
 
-- **Linux mit systemd** — entwickelt und geprüft auf Ubuntu 22.04. (Der
-  Docker-Weg läuft auf jedem Wirt, auf dem Docker läuft.)
+- **Linux mit systemd auf x86_64**, entwickelt und von Anfang bis Ende geprüft
+  auf Ubuntu 22.04. Ubuntu 24.04 und Debian 12/13 haben dieselben Pakete und
+  sollten laufen, sind aber noch nicht vollständig durchgetestet. ARM-Rechner
+  lehnt der Installer ab: DayZ-Server und SteamCMD gibt es nur für x86_64. (Der
+  Docker-Weg läuft auf jedem x86_64-Wirt, auf dem Docker läuft.)
 - **Ein Steam-Konto, das DayZ besitzt.** Anonym lehnt Steam den Download ab
   („No subscription"). Das kann kein Panel umgehen.
 - **Ein DZPage-Konto** für den Panel-Schlüssel — kostenlos, und der Schlüssel
@@ -48,16 +51,38 @@ Maschine faktisch root** — das liegt an Docker, nicht am Panel.
 
 ### Weg A: ein Befehl (systemd)
 
+Am einfachsten beginnt es auf dzpage.com: unter **RCon → Server verbinden** auf
+**Meinen Befehl holen** klicken. Du bekommst einen Befehl mit einem
+Einmal-Kopplungscode darin:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh | sudo bash
+curl -fsSL https://dzpage.com/panel/install.sh | sudo bash -s -- --pair dzp_pair_…
 ```
 
-Das holt das Projekt nach `/opt/dzpage-panel`, checkt die neueste
-veröffentlichte Fassung aus und startet `install.sh`. Optionen werden nach `--`
-durchgereicht:
+Den fügst du ins Terminal deines Servers ein (SSH). Er installiert das Panel,
+verbindet es von selbst mit deinem DZPage-Konto und fragt am Ende nach dem
+Steam-Konto, das DayZ besitzt. Das war es. Der Kopplungscode gilt einmal und
+eine Stunde.
+
+Ohne diesen Befehl geht es auch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh | sudo bash -s -- --with-docker
+curl -fsSL https://dzpage.com/panel/install.sh | sudo bash
+```
+
+Am Ende zeigt das Terminal einen Link wie `https://dzpage.com/link?code=K7QF-M2XP`.
+Öffnen, prüfen, dass Name und Adresse dein Server sind, **Verbinden** klicken,
+und das Terminal bestätigt binnen Sekunden. Später oder nach einem widerrufenen
+Schlüssel: `sudo dzpage-panel link`.
+
+`dzpage.com/panel/install.sh` leitet nur auf `bootstrap.sh` in diesem
+Repository weiter; `https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh`
+ist dieselbe Datei. Sie holt das Projekt nach `/opt/dzpage-panel`, checkt die
+neueste veröffentlichte Fassung aus und startet `install.sh`. Optionen werden
+nach `--` durchgereicht:
+
+```bash
+curl -fsSL https://dzpage.com/panel/install.sh | sudo bash -s -- --with-docker
 ```
 
 Wer das Skript lieber erst liest — eine vernünftige Gewohnheit — macht es in
@@ -70,18 +95,49 @@ sudo /opt/dzpage-panel/install.sh
 
 Beides ergibt genau dieselbe Installation, samt Selbstaktualisierung.
 
-Der Installer legt den Dienstbenutzer `dzpage` an, richtet `/etc/dzpage-panel`
+Der Installer prüft zuerst die Maschine (x86_64, Verteilung, Arbeitsspeicher,
+freier Platz), legt den Dienstbenutzer `dzpage` an, richtet `/etc/dzpage-panel`
 und `/var/lib/dzpage-panel` ein, kopiert das Programm nach
 `/usr/lib/dzpage-panel`, schreibt die systemd-Unit und startet den Dienst.
 **Ein zweiter Lauf aktualisiert nur** — Konfiguration und Daten bleiben stehen.
 
+Verwaltet wird über dzpage.com, deshalb braucht das Panel weder einen offenen
+Port noch eine Domain. Seine **lokale Oberfläche** auf `127.0.0.1:8410` bleibt
+als optionaler Notzugang: über einen SSH-Tunnel, oder mit eigener Domain und
+HTTPS (siehe [Von außen erreichbar machen](#von-außen-erreichbar-machen)).
+Solange es dort keinen Administrator gibt, öffnet nur der **Einrichtungscode**,
+den der Installer ausgibt, ihren Assistenten. So kann niemand sonst, der den
+Port erreicht, das Panel übernehmen.
+
+```bash
+ssh -L 8410:127.0.0.1:8410 du@dein-server
+```
+
 | Option | Wirkung |
 |---|---|
+| `--pair <code>` | mit dem Kopplungscode von dzpage.com verbinden |
+| `--no-link` | am Ende keinen Kopplungslink anbieten |
+| `--domain <name>` | HTTPS für die lokale Oberfläche (Caddy, Let’s Encrypt) |
 | `--no-steam-deps` | keine i386-Architektur, keine 32-Bit-Bibliotheken |
 | `--no-node` | keine eigene Node-Laufzeit installieren |
 | `--with-docker` | Docker-Laufzeit für Spielserver freischalten |
 
-Danach läuft die Oberfläche auf **http://127.0.0.1:8410**.
+### Der Befehl `dzpage-panel`
+
+Der Installer legt außerdem einen Befehl auf die Maschine, für alles, was die
+Weboberfläche selbst nicht kann:
+
+| Befehl | Was er tut |
+|---|---|
+| `sudo dzpage-panel link` | diesen Server mit deinem DZPage-Konto verbinden (Link und Code) |
+| `sudo dzpage-panel steam-login <konto>` | Steam-Anmeldung für die Downloads; das Passwort tippst du direkt in SteamCMD |
+| `sudo dzpage-panel status` | Dienst, Fassung, DZPage-Verbindung, Adresse, offener Einrichtungscode |
+| `sudo dzpage-panel setup-code` | Einrichtungscode der lokalen Oberfläche |
+| `sudo dzpage-panel reset-password [name]` | Passwort vergessen: erzeugt ein neues, beendet alle Sitzungen |
+| `sudo dzpage-panel https enable <domain>` | HTTPS für die Oberfläche, auch nachträglich |
+| `sudo dzpage-panel https disable` | zurück auf nur `127.0.0.1` |
+| `sudo dzpage-panel logs` | Protokoll des Panels mitlesen |
+| `sudo dzpage-panel uninstall [--purge]` | Panel entfernen (siehe [Entfernen](#entfernen)) |
 
 ### Weg B: Docker
 
@@ -110,11 +166,19 @@ Was die Compose-Datei einrichtet, und warum:
 Im Docker-Weg ist **Docker die einzige Laufzeit** für Spielserver; im Container
 gibt es kein systemd, in das eine Unit gestartet werden könnte.
 
+Der Einrichtungscode liegt im eingehängten Konfigurationsverzeichnis und wird
+deshalb auf dem Wirt gelesen:
+
+```bash
+sudo cat /etc/dzpage-panel/setup-code
+```
+
 ---
 
 ## Panel-Schlüssel bei DZPage anlegen
 
-Das gehört **vor** den Assistenten — Schritt 4 fragt danach.
+Nur nötig, wenn du über den lokalen Assistenten verbindest statt zu koppeln:
+Schritt 4 fragt danach. Die Kopplung legt je Server selbst einen Schlüssel an.
 
 1. Bei [dzpage.com](https://dzpage.com) anmelden.
 2. **RCon** öffnen (dzpage.com/rcon).
@@ -126,12 +190,18 @@ Der Schlüssel darf ein Panel anmelden, dessen Zustand melden und Server
 registrieren — mehr nicht. Kontozugang gibt er nicht. Bei uns liegt er nur als
 SHA-256-Hash und ist auf derselben Seite jederzeit widerrufbar.
 
-Bis zu drei Schlüssel sind möglich, und jedes Panel, das einen benutzt, steht
+Bis zu zehn aktive Schlüssel sind möglich, und jedes Panel, das einen benutzt, steht
 auf derselben Seite mit Fassung, Plattform und letztem Kontakt.
 
 ---
 
 ## Der Assistent
+
+Zuerst fragt der Assistent nach dem **Einrichtungscode**, den der Installer
+ausgegeben hat (er steht auch in `/etc/dzpage-panel/setup-code`, oder
+`sudo dzpage-panel setup-code`). Falsche Versuche werden je Adresse gedrosselt.
+Sobald der Administrator existiert, ist der Code gelöscht, und der Weg hinein
+führt über die normale Anmeldung.
 
 1. **Datenbank** — SQLite (Standard, keine Einrichtung) oder MySQL/MariaDB mit
    Verbindungstest.
@@ -167,6 +237,32 @@ Im systemd-Weg läuft **jeder Server unter einem eigenen Benutzer**
 (`dzsrv_<kennung>`), in seinem eigenen Verzeichnis, mit eigenen Speicher- und
 CPU-Grenzen. Er kann weder die Konfiguration des Panels lesen noch die Dateien
 der Nachbarn.
+
+**Spieldateien installieren und aktualisieren** läuft immer gleich, ob über die
+Schaltfläche, einen Auftrag von DZPage oder die automatische Aktualisierung: Ein
+laufender Server wird vorher angehalten und danach wieder gestartet. Nach dem
+Download fragt das Panel den Lader des Systems (`ldd`), ob `DayZServer` auf
+dieser Maschine alle Bibliotheken findet, und nennt fehlende beim Namen.
+(Bei Docker-Servern entfällt diese Prüfung: Sie laufen mit den Bibliotheken
+des Containers.) Scheitert der Download selbst, bleibt ein vorher fertiger
+Server fertig und läuft mit den alten Dateien wieder an, denn SteamCMD tauscht
+sie erst ganz am Ende. Scheitert ein Schritt nach dem Download, etwa an einer
+fehlenden Bibliothek, liegen die neuen Dateien schon da: Der Server steht dann
+auf „fehlgeschlagen“ und bleibt angehalten, bis die Installation gelingt. Ein
+neuer Server startet ab der ersten Installation mit der Maschine.
+
+**Firewall.** Spieler und das RCon von DZPage erreichen einen Server von außen,
+deshalb müssen seine drei UDP-Ports (Spiel, Query, RCon) offen sein. Ist `ufw`
+oder `firewalld` aktiv, öffnet das Panel sie vor jedem Start und schließt sie
+beim Löschen wieder (ufw-Regeln tragen den Kommentar `dzpage-panel <kennung>`).
+Von Hand gepflegte iptables- oder nftables-Regeln bleiben unberührt. Die
+Serverseite zeigt den Stand unter **Firewall**. Eine Firewall beim Hoster (etwa
+die Hetzner Cloud Firewall) sieht die Maschine nicht; dort die Ports ebenfalls
+freigeben.
+
+**Löschen** hält den Server an, entfernt Benutzer, Unit, Firewall-Regeln und
+Dateien und schaltet ihn bei DZPage ab, damit er dort nicht als Leiche stehen
+bleibt.
 
 ### serverDZ.cfg bearbeiten
 
@@ -303,10 +399,13 @@ einen Neustartzeitplan. Die Vorwarnung im Spiel geht über RCon, der Neustart
 über das Panel — diese Kombination braucht beide Hälften.
 
 Das Panel hält dafür eine ausgehende Verbindung offen (Long-Poll) und holt sich
-Aufträge ab. **Es muss kein Port geöffnet werden**, und es funktioniert hinter
-CGNAT. Jeder Auftrag wird geprüft, bevor er ausgeführt wird: bekannte
-Auftragsart, Zielserver gehört zu diesem Panel, Ergebnis geht zurück, alles
-landet im Ereignisprotokoll.
+Aufträge ab. **Für das Panel selbst muss kein Port geöffnet werden**, und es
+funktioniert hinter CGNAT. (Die Spielserver brauchen ihre Ports, siehe Firewall
+oben: Das RCon von DZPage verbindet sich mit ihnen.) Jeder Auftrag wird geprüft,
+bevor er ausgeführt wird: bekannte Auftragsart, Zielserver gehört zu diesem
+Panel, ein Start braucht installierte Spieldateien, Ergebnis geht zurück, alles
+landet im Ereignisprotokoll. Aufträge für denselben Server laufen nacheinander,
+nie gleichzeitig.
 
 ---
 
@@ -315,6 +414,23 @@ landet im Ereignisprotokoll.
 Das Panel bindet sich absichtlich an `127.0.0.1`. Für den Zugriff von außen
 gehört ein Reverse-Proxy mit TLS davor — ein Panel ohne TLS ins Internet zu
 stellen ist die Standardfalle bei solchen Produkten.
+
+**Der bequeme Weg** ist eingebaut. Einen DNS-Eintrag (A-Eintrag) auf die
+Maschine zeigen lassen, dann:
+
+```bash
+sudo dzpage-panel https enable panel.example.com
+```
+
+Das installiert bei Bedarf [Caddy](https://caddyserver.com) aus dem offiziellen
+Paketarchiv, schreibt `/etc/caddy/dzpage-panel.caddy`, öffnet 80 und 443 in ufw
+oder firewalld und sagt dem Panel, dass ein Proxy davorsteht. Caddy holt das
+Zertifikat bei Let’s Encrypt und erneuert es selbst. Lauscht auf Port 80 oder
+443 schon etwas anderes, bricht das Skript ab und ändert nichts; dann den
+eigenen Proxy nehmen. `sudo dzpage-panel https disable` macht es rückgängig
+(Caddy selbst bleibt installiert).
+
+**Ein eigener Proxy**, zum Beispiel nginx:
 
 ```nginx
 server {
@@ -332,9 +448,11 @@ server {
 }
 ```
 
-Dazu in `/etc/dzpage-panel/panel.json` `"trustProxy": true` setzen und den
-Dienst neu starten. Erst dann wertet das Panel `X-Forwarded-Proto` aus und setzt
-das Secure-Flag auf dem Sitzungscookie.
+Dazu in `/etc/dzpage-panel/panel.json` `"trustProxy": true` setzen (oder
+`Environment=DZPAGE_PANEL_TRUST_PROXY=1` als Ergänzung zu `dzpage-panel.service`)
+und den Dienst neu starten. Erst dann wertet das Panel `X-Forwarded-Proto` aus
+und setzt das Secure-Flag auf dem Sitzungscookie; ohne das weist die
+Herkunftsprüfung jedes Formular ab, das über https kommt.
 
 ---
 
@@ -377,10 +495,21 @@ sudo -u dzpage npm install --omit=dev --prefix /usr/lib/dzpage-panel mysql2
   unprivilegierter Prozess. Statt das Panel als root laufen zu lassen, schickt
   es eine Zeile an einen Socket (`/run/dzpage-panel-helper.sock`, nur für den
   Dienstbenutzer zu öffnen), und systemd startet dafür kurz `helper.sh` als
-  root. Der Helfer kennt genau zehn Operationen und prüft jeden Parameter gegen
-  ein Muster. sudo wäre der übliche Weg, funktioniert hier aber nicht: Die Unit
-  des Panels setzt über `PrivateDevices` und `ProtectKernelTunables` implizit
-  `NoNewPrivileges`, und damit kann sudo keine Rechte mehr erhöhen.
+  root. Der Helfer kennt genau dreizehn Operationen (Dienste, Zustand,
+  Protokoll, Firewall-Ports, Selbstaktualisierung) und prüft jeden Parameter
+  gegen ein Muster; eine Operation mit einem falschen Parameter bricht ab und
+  meldet einen Fehlercode. sudo wäre der übliche Weg, funktioniert hier aber
+  nicht: Die Unit des Panels setzt über `PrivateDevices` und
+  `ProtectKernelTunables` implizit `NoNewPrivileges`, und damit kann sudo keine
+  Rechte mehr erhöhen.
+- **Einrichtungscode statt „wer zuerst kommt“.** Solange es keinen
+  Administrator gibt, öffnet nur der Einmal-Code aus dem Installer den lokalen
+  Assistenten.
+- **Koppeln, ohne Geheimnisse abzutippen.** Der Kopplungscode im
+  Installationsbefehl gilt einmal und eine Stunde, der Code im Link 15 Minuten,
+  und die Seite auf dzpage.com zeigt Name und Adresse der Maschine, bevor du
+  bestätigst. Das Panel bekommt nie etwas anderes als seinen eigenen,
+  widerrufbaren Schlüssel.
 - **Keine Shell in der Oberfläche.** Alle Aktionen sind feste, benannte
   Operationen; Prozesse werden mit Argumentlisten gestartet, nie über eine
   Shell-Zeichenkette. Was doch durch eine Kommandozeile muss, wird gegen eine
@@ -420,12 +549,17 @@ zwei Minuten und ist kein Fehler.
 ## Entfernen
 
 ```bash
-sudo systemctl disable --now dzpage-panel
-sudo rm -f /etc/systemd/system/dzpage-panel.service
-sudo systemctl daemon-reload
-sudo rm -rf /usr/lib/dzpage-panel /etc/dzpage-panel /opt/dzpage-panel
-sudo rm -rf /var/lib/dzpage-panel     # löscht auch Spieldateien und Datenbank
-sudo userdel dzpage
+sudo dzpage-panel uninstall
+```
+
+Das hält das Panel und alle Spielserver an und entfernt Dienste,
+Serverbenutzer, die Firewall-Regeln des Panels, seine Caddy-Seite und das
+Programm. Spieldateien, Speicherstände, Datenbank und Konfiguration bleiben in
+`/var/lib/dzpage-panel` und `/etc/dzpage-panel` liegen; eine neue Installation
+setzt dort wieder auf. Auch das löschen (nicht umkehrbar):
+
+```bash
+sudo dzpage-panel uninstall --purge
 ```
 
 Docker-Weg:
@@ -479,7 +613,7 @@ zusammen. Sie wird bei jeder Anmeldung und jedem Herzschlag an DZPage gemeldet
 und ist die Zahl, gegen die die Update-Prüfung vergleicht.
 
 ```bash
-git tag v0.3.1 && git push origin v0.3.1
+git tag v0.4.0 && git push origin v0.4.0
 ```
 
 Jedes Panel da draußen sieht dieses Etikett binnen sechs Stunden. Es gibt keinen

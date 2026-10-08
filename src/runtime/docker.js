@@ -110,6 +110,9 @@ export function createDockerRuntime() {
         name,
         "--restart",
         "unless-stopped",
+        // Wie in der systemd-Unit: DayZ speichert und geht auf SIGINT.
+        "--stop-signal",
+        "SIGINT",
         "--user",
         `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
         "--cpus",
@@ -190,6 +193,11 @@ export function createDockerRuntime() {
 
     async destroy(server) {
       await removeContainer(server.id);
+    },
+
+    /** Docker veroeffentlicht die Ports selbst und an ufw vorbei (eigene iptables-Regeln). */
+    async firewall() {
+      return { backend: "docker", open: [] };
     },
 
     directory(id) {

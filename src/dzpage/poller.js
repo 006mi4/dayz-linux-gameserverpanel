@@ -1,9 +1,11 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { DzpageClient } from "./client.js";
 import { getSetting, KEYS } from "../store/settings.js";
-import { getServer, rconPassword, updateServer } from "../store/servers.js";
+import { getServer, serverDir } from "../store/servers.js";
 import { recordEvent } from "../store/events.js";
 import { runtimeFor } from "../runtime/index.js";
-import { provisionServer } from "../servers/install.js";
+import { updateGameFiles } from "../servers/install.js";
 import { log } from "../log.js";
 
 /**
@@ -29,6 +31,8 @@ export function createPoller(app) {
   let timer = null;
   let backoffMs = 0;
   let inFlight = null;
+  /** Letzter Auftrag je Server; der naechste haengt sich dahinter. */
+  const queues = new Map();
 
   function client() {
     return new DzpageClient({ baseUrl: app.config.dzpage.baseUrl, key: app.config.dzpage.key });
@@ -45,10 +49,21 @@ export function createPoller(app) {
       if (!server) throw new Error("Der Auftrag nennt einen Server, den dieses Panel nicht kennt.");
 
       const runtime = runtimeFor(server);
+      const launches = job.kind === "start" || job.kind === "restart";
+      // Ohne Spieldateien wuerde systemd den Start annehmen und DayZ sofort
+      // wieder aussteigen: DZPage bekaeme "ausgefuehrt" fuer etwas, das nie lief.
+      // Gefragt wird die Platte, nicht der Vermerk: Ein Server, der aus 0.3.x
+      // noch auf "fehlgeschlagen" steht, hat seine Dateien meist trotzdem.
+      if (launches && server.install_state === "installing") {
+        throw new Error("Die Spieldateien werden gerade installiert. Danach erneut starten.");
+      }
+      if (launches && !existsSync(join(serverDir(server.id), "game", "DayZServer"))) {
+        throw new Error("Die Spieldateien sind nicht installiert. Erst installieren, dann starten.");
+      }
       // Wie in der Oberflaeche: vor dem Starten einrichten. Ein Neustart aus
       // der Ferne ist genau der Moment, in dem niemand danebensteht und
       // nachhelfen kann.
-      if (job.kind === "start" || job.kind === "restart") await runtime.prepare(server);
+      if (launches) await runtime.prepare(server);
 
       if (job.kind === "start") await runtime.start(server);
       else if (job.kind === "stop") await runtime.stop(server);
@@ -73,25 +88,16 @@ export function createPoller(app) {
       .catch(() => undefined);
   }
 
-  /** Aktualisierung laeuft als Vorgang, damit die Oberflaeche sie mitliest. */
+  /**
+   * Aktualisierung laeuft als Vorgang, damit die Oberflaeche sie mitliest.
+   * Anhalten und Wiederanlaufen eines laufenden Servers macht updateGameFiles,
+   * genau wie bei der Schaltflaeche im Panel.
+   */
   async function runUpdate(server) {
     const started = app.jobs.start("server-install", async (job) => {
-      const account = await getSetting(app.db, KEYS.steamAccount);
-      await updateServer(app.db, server.id, { install_state: "installing" });
-      try {
-        await provisionServer({
-          config: app.config,
-          server,
-          account,
-          job,
-          runtime: runtimeFor(server),
-          rconPassword: rconPassword(server, app.config.secrets.encryption),
-        });
-      } catch (err) {
-        await updateServer(app.db, server.id, { install_state: "failed" });
-        throw err;
-      }
-      await updateServer(app.db, server.id, { install_state: "ready", installed_at: Date.now() });
+      job.serverId = server.id;
+      await updateGameFiles(app, server, job);
+      return { serverId: server.id };
     });
 
     if (!started.ok) throw new Error("Es laeuft schon ein anderer Vorgang.");
@@ -133,7 +139,19 @@ export function createPoller(app) {
     if (jobs.length) log.info(`${jobs.length} Auftrag/Auftraege von DZPage erhalten`);
     // Nicht auf die Ausfuehrung warten: der naechste Long-Poll soll sofort
     // wieder offen sein, sonst verpasst das Panel den naechsten Auftrag.
-    inFlight = Promise.all(jobs.map((job) => handle(job, panelId).catch(() => undefined)));
+    //
+    // Je Server aber der Reihe nach: "stop" und "start" fuer denselben Server
+    // gleichzeitig ausgefuehrt, ergaeben einen Zustand, den niemand bestellt hat.
+    for (const job of jobs) {
+      const key = typeof job?.serverId === "string" ? job.serverId : "";
+      const previous = queues.get(key) ?? Promise.resolve();
+      const next = previous.then(() => handle(job, panelId)).catch(() => undefined);
+      queues.set(key, next);
+      next.finally(() => {
+        if (queues.get(key) === next) queues.delete(key);
+      });
+    }
+    inFlight = Promise.all([...queues.values()]);
     schedule(jobs.length ? 250 : 1_000);
   }
 

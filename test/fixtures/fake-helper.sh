@@ -14,7 +14,14 @@ STATE_FILE="$STATE_DIR/$ID.state"
 
 case "$ACTION" in
   prepare)
-    echo stopped > "$STATE_FILE"
+    # Ein Test kann prepare scheitern lassen, um Fehler nach dem Download
+    # nachzustellen.
+    if [ -f "$STATE_DIR/fail-prepare" ]; then
+      echo "prepare gescheitert (Test)" >&2
+      exit 1
+    fi
+    # prepare laesst einen laufenden Server laufen, wie der echte Helfer.
+    [ "$(cat "$STATE_FILE" 2>/dev/null)" = running ] || echo stopped > "$STATE_FILE"
     echo "prepared $ID"
     ;;
   start|restart)
@@ -41,6 +48,9 @@ case "$ACTION" in
     STATE=$(cat "$STATE_FILE" 2>/dev/null || echo inactive)
     if [ "$STATE" = running ]; then
       printf 'ActiveState=active\nSubState=running\nMainPID=4242\nMemoryCurrent=524288000\nNRestarts=1\n'
+    elif [ "$STATE" = starting ]; then
+      # systemd zwischen zwei Startversuchen eines abstuerzenden Servers
+      printf 'ActiveState=activating\nSubState=auto-restart\nMainPID=0\nMemoryCurrent=[not set]\nNRestarts=7\n'
     else
       printf 'ActiveState=inactive\nSubState=dead\nMainPID=0\nMemoryCurrent=[not set]\nNRestarts=0\n'
     fi
@@ -53,6 +63,10 @@ case "$ACTION" in
     ;;
   logs)
     printf '2026-08-07T00:00:00+0000 dzpage-server-%s[4242]: DayZ server ready\n' "$ID"
+    ;;
+  firewall-open|firewall-close|firewall-status)
+    # Die Suite laeuft ohne Firewall: genau das meldet der echte Helfer dann auch.
+    echo "backend=none"
     ;;
   self-update)
     # Im Betrieb startet der Helfer hier einen eigenen Dienst, der die Dateien

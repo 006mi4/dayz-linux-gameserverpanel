@@ -342,7 +342,10 @@ export function createPanelUpdateWatcher(app, { fetchImpl = fetch } = {}) {
     if (!app.db) return false;
     const mode = (await getSetting(app.db, KEYS.panelUpdateMode)) || DEFAULT_PANEL_UPDATE_MODE;
     if (mode === "off") return false;
-    return (await getSetting(app.db, KEYS.setupCompletedAt)) !== null;
+    if ((await getSetting(app.db, KEYS.setupCompletedAt)) !== null) return true;
+    // Wer ueber "dzpage-panel link" gekoppelt hat, durchlaeuft den Assistenten
+    // nie. Ohne diese Bedingung bekaeme genau dieses Panel keine Fassung mehr.
+    return Boolean(app.config.dzpage.key) && (await getSetting(app.db, KEYS.dzpagePanelId)) !== null;
   }
 
   async function round() {
@@ -359,7 +362,14 @@ export function createPanelUpdateWatcher(app, { fetchImpl = fetch } = {}) {
         lastCheck = Date.now();
         const { latest, newer } = await checkPanelUpdate(app, { fetchImpl });
         const mode = (await getSetting(app.db, KEYS.panelUpdateMode)) || DEFAULT_PANEL_UPDATE_MODE;
-        if (newer && mode === "auto" && canSelfUpdate()) {
+        // Eine Fassung, die hier schon einmal gescheitert ist, nicht von selbst
+        // wieder einspielen: Sonst liefe Aktualisieren, Fehlstart, Ruecknahme
+        // alle paar Stunden im Kreis. Die Schaltflaeche bleibt der Weg dafuer.
+        const last = readSelfUpdateResult();
+        const failedBefore = last?.state === "failed" && last.to === latest;
+        if (newer && mode === "auto" && canSelfUpdate() && failedBefore) {
+          log.info(`Panel ${latest} ist hier schon einmal gescheitert und wird nicht von selbst wiederholt.`);
+        } else if (newer && mode === "auto" && canSelfUpdate()) {
           // Ein laufender Vorgang hat Vorrang: Wer gerade DayZ herunterlaedt,
           // soll das nicht durch einen Neustart des Panels verlieren.
           if (app.jobs.current()?.running) {

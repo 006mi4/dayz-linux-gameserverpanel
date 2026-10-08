@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { Client, launchPanel, prepareEnv, startDzpageStub, unlockSetup } from "../test-support/helper.js";
 
 /**
  * Der Steam-Schritt. Gegen einen Nachbau von SteamCMD, der dieselben
@@ -199,6 +199,7 @@ test("Steam-Schritt über HTTP: Rückfrage im Browser beantworten", async () => 
   const panel = await launchPanel();
   const client = new Client(panel.url);
 
+  await unlockSetup(client, env);
   await client.get("/setup/database");
   await client.submit("/setup/database", { kind: "sqlite", action: "save" });
   await client.get("/setup/admin");

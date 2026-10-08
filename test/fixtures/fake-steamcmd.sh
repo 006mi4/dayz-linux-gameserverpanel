@@ -30,6 +30,33 @@ if [ "${1:-}" = '+login' ] && [ "${2:-}" = 'anonymous' ]; then
   exit 0
 fi
 
+# Installation der Spieldateien: "+force_install_dir DIR +login KONTO
+# +app_update 223350 validate +quit". Mit gemerkter Sitzung (cached*) legt das
+# einen ausfuehrbaren DayZServer-Ersatz und das echte Manifest ab, sonst fragt
+# es nach dem Passwort wie das Original bei abgelaufener Sitzung.
+if [ "${1:-}" = '+force_install_dir' ] && [ "${3:-}" = '+login' ]; then
+  dir=$2
+  account=${4:-}
+  printf 'Steam Console Client (c) Valve Corporation - version 1728594755\n'
+  printf 'Loading Steam API...OK\n'
+  case "$account" in
+    cached*)
+      printf "Logging in user '%s' [U:1:0] to Steam Public...OK\n" "$account"
+      mkdir -p "$dir/steamapps"
+      printf '#!/bin/sh\nexit 0\n' > "$dir/DayZServer"
+      chmod 0755 "$dir/DayZServer"
+      cp "$(dirname "$0")/appmanifest_223350.acf" "$dir/steamapps/appmanifest_223350.acf"
+      printf ' Update state (0x61) downloading, progress: 50.00 (2048 / 4096)\n'
+      printf "Success! App '223350' fully installed.\n"
+      ;;
+    *)
+      printf 'Cached credentials not found.\n\n'
+      printf 'password: '
+      ;;
+  esac
+  exit 0
+fi
+
 if [ "${1:-}" = '+login' ]; then
   printf 'Steam Console Client (c) Valve Corporation - version 1728594755\n'
   printf -- '-- type "quit" to exit --\n'

@@ -54,6 +54,10 @@ export async function findUserById(db, id) {
   return db.get("SELECT * FROM users WHERE id = ?", [id]);
 }
 
+export async function setPassword(db, id, password) {
+  await db.run("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), id]);
+}
+
 export async function markLogin(db, id) {
   await db.run("UPDATE users SET last_login_at = ? WHERE id = ?", [Date.now(), id]);
 }

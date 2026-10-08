@@ -6,6 +6,7 @@ import * as dzpage from "../routes/dzpage.js";
 import * as servers from "../routes/servers.js";
 import * as serverconfig from "../routes/serverconfig.js";
 import * as updates from "../routes/updates.js";
+import * as account from "../routes/account.js";
 
 /**
  * Feste Routentabelle. Es gibt keine dynamischen Pfade und keine Platzhalter —
@@ -16,7 +17,8 @@ import * as updates from "../routes/updates.js";
  * access:
  *   public — auch ohne Anmeldung erreichbar
  *   user   — Sitzung noetig
- *   setup  — nur waehrend der Einrichtung (danach 404)
+ *   setup  — nur waehrend der Einrichtung (danach 404); ohne Administrator
+ *            zusaetzlich nur mit dem Einrichtungscode
  */
 export const ROUTES = [
   { path: "/", methods: ["GET"], access: "public", handler: dashboard.root },
@@ -24,8 +26,10 @@ export const ROUTES = [
 
   { path: "/login", methods: ["GET", "POST"], access: "public", handler: auth.login },
   { path: "/logout", methods: ["POST"], access: "user", handler: auth.logout },
+  { path: "/account", methods: ["GET", "POST"], access: "user", handler: account.page },
 
   { path: "/setup", methods: ["GET"], access: "setup", handler: setup.index },
+  { path: "/setup/unlock", methods: ["GET", "POST"], access: "setup", unlocks: true, handler: setup.unlock },
   { path: "/setup/database", methods: ["GET", "POST"], access: "setup", handler: setup.database },
   { path: "/setup/admin", methods: ["GET", "POST"], access: "setup", handler: setup.admin },
   { path: "/setup/done", methods: ["GET", "POST"], access: "user", handler: setup.done },

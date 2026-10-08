@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Client, launchPanel, prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { Client, launchPanel, prepareEnv, startDzpageStub, unlockSetup } from "../test-support/helper.js";
 
 /**
  * Der MySQL-Weg gegen eine echte Datenbank. Laeuft nur, wenn eine angegeben
@@ -68,6 +68,7 @@ test("MySQL: Assistent läuft mit MySQL durch", { skip }, async () => {
   const panel = await launchPanel();
   const client = new Client(panel.url);
 
+  await unlockSetup(client, env);
   await client.get("/setup/database");
   await client.submit("/setup/database", {
     kind: "mysql",

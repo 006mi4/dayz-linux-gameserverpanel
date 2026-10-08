@@ -1,8 +1,6 @@
 import { hostname } from "node:os";
-import { saveConfig } from "../config.js";
-import { DzpageClient, PANEL_KEY_PREFIX } from "../dzpage/client.js";
-import { KEYS, setSetting } from "../store/settings.js";
-import { recordEvent } from "../store/events.js";
+import { PANEL_KEY_PREFIX } from "../dzpage/client.js";
+import { adoptKey } from "../dzpage/pairing.js";
 import { csrfInput, escapeHtml, field, notice, stepper } from "../http/html.js";
 import { log } from "../log.js";
 
@@ -74,26 +72,12 @@ export async function connect(rc) {
     return;
   }
 
-  const client = new DzpageClient({ baseUrl: rc.config.dzpage.baseUrl, key });
-  const result = await client.register({ name });
+  const result = await adoptKey({ config: rc.config, db: rc.app.db, key, name });
   if (!result.ok) {
     log.warn(`Anmeldung bei DZPage fehlgeschlagen (${result.code})`);
     render(400, form(rc, { name, message: errorMessage(rc, result) }));
     return;
   }
-
-  rc.config.dzpage.key = key;
-  rc.config.dzpage.panelName = name;
-  saveConfig(rc.config);
-  await setSetting(rc.app.db, KEYS.dzpagePanelId, result.panelId);
-  await setSetting(rc.app.db, KEYS.dzpageAccount, result.account ?? "");
-  await setSetting(rc.app.db, KEYS.dzpageHeartbeatSeconds, result.heartbeatSeconds ?? 60);
-  await setSetting(rc.app.db, KEYS.dzpageLastSeenAt, Date.now());
-  await recordEvent(rc.app.db, {
-    kind: "dzpage.register",
-    source: "dzpage",
-    message: `Panel bei DZPage angemeldet (${result.account || "Konto unbekannt"})`,
-  });
   log.info(`Panel bei DZPage angemeldet: ${result.panelId}`);
   // Beide Schleifen brauchen den Schluessel, den es beim Start des Dienstes
   // noch nicht gab — ohne den Neustart des Abholers bliebe der erste Auftrag

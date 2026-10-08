@@ -141,7 +141,7 @@ ${head}
 <div class="main">
   <header class="bar">
     <div class="crumb"><strong>${escapeHtml(title)}</strong></div>
-    <div class="who">${langLinks}${user ? html`<span>${user.username}</span>` : ""}${logout}</div>
+    <div class="who">${langLinks}${user ? html`<a class="account" href="/account">${user.username}</a>` : ""}${logout}</div>
   </header>
   <main class="content">
 ${body}

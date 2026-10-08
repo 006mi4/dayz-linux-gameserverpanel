@@ -134,3 +134,50 @@ test("SQLite: abgelaufene Sitzungen gelten nicht mehr", async () => {
   assert.equal(await getSession(db, session.id), null);
   await db.close();
 });
+
+test("Einrichtungscode: Form, Eingabe wie abgetippt, nur der richtige passt", async () => {
+  const { mkdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { generateSetupCode, ensureSetupCode, matchesSetupCode, clearSetupCode, readSetupCode } = await import(
+    "../src/auth/setupcode.js"
+  );
+  const seen = new Set();
+  for (let i = 0; i < 200; i += 1) {
+    const code = generateSetupCode();
+    // Keine verwechselbaren Zeichen: 0/O und 1/I/L fehlen im Alphabet.
+    assert.match(code, /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+    seen.add(code);
+  }
+  assert.equal(seen.size, 200);
+
+  mkdirSync(join(env.root, "codes"), { recursive: true });
+  const file = join(env.root, "codes", "setup-code");
+  assert.equal(matchesSetupCode("irgendwas", file), false, "ohne Datei passt nichts");
+  const code = ensureSetupCode(file);
+  assert.equal(ensureSetupCode(file), code, "ein vorhandener Code bleibt");
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal(matchesSetupCode(code, file), true);
+  assert.equal(matchesSetupCode(code.toLowerCase().replaceAll("-", " "), file), true);
+  assert.equal(matchesSetupCode(code.slice(0, -1), file), false);
+  assert.equal(matchesSetupCode("", file), false);
+  clearSetupCode(file);
+  assert.equal(readSetupCode(file), null);
+  assert.equal(matchesSetupCode(code, file), false);
+});
+
+test("Proxy-Angaben aus https.sh gelten nur für Verbindungen von dieser Maschine", async () => {
+  const { trustsProxy } = await import("../src/http/server.js");
+  const from = (remoteAddress) => ({ socket: { remoteAddress } });
+  const envMode = {};
+  Object.defineProperty(envMode, "trustProxyEnv", { value: true, enumerable: false });
+
+  assert.equal(trustsProxy(from("127.0.0.1"), envMode), true);
+  assert.equal(trustsProxy(from("::1"), envMode), true);
+  assert.equal(trustsProxy(from("::ffff:127.0.0.1"), envMode), true);
+  // Lauscht das Panel versehentlich nach aussen, darf niemand von dort die
+  // Adresse faelschen und so die Drosselung umgehen.
+  assert.equal(trustsProxy(from("203.0.113.9"), envMode), false);
+  // Die Einstellung in panel.json entscheidet der Betreiber selbst.
+  assert.equal(trustsProxy(from("203.0.113.9"), { trustProxy: true }), true);
+  assert.equal(trustsProxy(from("127.0.0.1"), {}), false);
+});
