@@ -15,9 +15,8 @@ wieder hochholen.
 ## Was du brauchst
 
 - **Linux mit systemd auf x86_64**, von Anfang bis Ende geprüft auf Ubuntu
-  22.04, Ubuntu 24.04 und Debian 12 (auch auf einem minimalen Debian 12 ohne
-  sudo, git und xz). Debian 13 hat dieselben Pakete und sollte laufen, ist aber
-  noch nicht vollständig durchgetestet. ARM-Rechner
+  22.04, Ubuntu 24.04, Debian 12 und Debian 13 (beide Debian auch als minimales
+  System ohne sudo, git und xz). ARM-Rechner
   lehnt der Installer ab: DayZ-Server und SteamCMD gibt es nur für x86_64. (Der
   Docker-Weg läuft auf jedem x86_64-Wirt, auf dem Docker läuft.)
 - **Ein Steam-Konto, das DayZ besitzt.** Anonym lehnt Steam den Download ab

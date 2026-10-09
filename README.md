@@ -31,9 +31,8 @@ cannot: bring a crashed server back up.
 ## What you need
 
 - **Linux with systemd on x86_64**, tested end to end on Ubuntu 22.04, Ubuntu
-  24.04 and Debian 12 (also a minimal Debian 12 without sudo, git or xz).
-  Debian 13 uses the same packages and should work, but has not been run
-  through completely yet. ARM machines are refused: the
+  24.04, Debian 12 and Debian 13 (both Debian versions also as a minimal
+  system without sudo, git or xz). ARM machines are refused: the
   DayZ server and SteamCMD only exist for x86_64. (The Docker install works on
   any x86_64 host that runs Docker.)
 - **A Steam account that owns DayZ.** Steam refuses the server download to

@@ -86,13 +86,11 @@ if [ -r /etc/os-release ]; then
   OS_VERSION=$(. /etc/os-release && echo "${VERSION_ID:-}")
   OS_NAME=$(. /etc/os-release && echo "${PRETTY_NAME:-$OS_ID $OS_VERSION}")
   # Ehrlich bleiben: Von Anfang bis Ende durchgetestet sind Ubuntu 22.04 und
-  # 24.04 und Debian 12, dieses auch als minimales System ohne sudo, git und
-  # xz. Debian 13 hat dieselben Pakete unter denselben Namen und sollte
-  # laufen; alles andere ist ungeprueft.
+  # 24.04 und Debian 12 und 13, die beiden Debian auch als minimales System
+  # ohne sudo, git und xz. Alles andere ist ungeprueft.
   case "$OS_ID:$OS_VERSION" in
-    ubuntu:22.04|ubuntu:24.04|debian:12) note "$OS_NAME" ;;
-    debian:13) note "$OS_NAME (sollte laufen, noch nicht vollstaendig durchgetestet)" ;;
-    *) warn "$OS_NAME ist ungeprueft. Geprueft sind Ubuntu 22.04 und 24.04 und Debian 12; weiter auf eigene Verantwortung." ;;
+    ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) note "$OS_NAME" ;;
+    *) warn "$OS_NAME ist ungeprueft. Geprueft sind Ubuntu 22.04 und 24.04 und Debian 12 und 13; weiter auf eigene Verantwortung." ;;
   esac
 fi
 
