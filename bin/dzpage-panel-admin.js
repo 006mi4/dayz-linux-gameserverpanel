@@ -105,6 +105,8 @@ function plain(value) {
 /** Strg+C, Strg+D oder ein aufgelegtes Terminal an der Rueckfrage. */
 const ABORTED = Symbol("abgebrochen");
 const PROMPT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+/** So lange wird vor der Frage verworfen, was schon im Terminal wartet. */
+const DRAIN_MS = 200;
 
 /**
  * Eine Frage direkt an das Terminal, nicht an stdin: Bei "curl ... | sudo bash"
@@ -114,6 +116,9 @@ const PROMPT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
  * Gelesen wird, ohne den Prozess zu blockieren: Ein blockierendes Lesen hielte
  * auch Strg+C auf, bis jemand Enter drueckt. So kommt ein Abbruch als ABORTED
  * zurueck, und der Aufrufer kann noch aufraeumen.
+ *
+ * Was vor der Frage getippt wurde, etwa ein Enter waehrend des Wartens auf die
+ * Bestaetigung, ist keine Antwort darauf und wird verworfen.
  */
 function askTerminal(question) {
   let fd;
@@ -125,6 +130,7 @@ function askTerminal(question) {
   return new Promise((resolve) => {
     let input = null;
     let answer = "";
+    let asking = false;
     let done = false;
     const finish = (value) => {
       if (done) return;
@@ -145,7 +151,6 @@ function askTerminal(question) {
     };
     for (const signal of PROMPT_SIGNALS) process.on(signal, onSignal);
     try {
-      writeSync(fd, question);
       input = new ReadStream(fd);
     } catch {
       finish(ABORTED);
@@ -153,11 +158,22 @@ function askTerminal(question) {
     }
     input.setEncoding("utf8");
     input.on("data", (chunk) => {
+      if (!asking) return;
       answer += chunk;
       if (answer.includes("\n")) finish(answer.split("\n")[0].trim());
     });
     input.on("end", () => finish(ABORTED));
     input.on("error", () => finish(ABORTED));
+    setTimeout(() => {
+      if (done) return;
+      try {
+        writeSync(fd, question);
+      } catch {
+        finish(ABORTED);
+        return;
+      }
+      asking = true;
+    }, DRAIN_MS);
   });
 }
 
@@ -165,8 +181,8 @@ function askTerminal(question) {
  * Wie bei AirDrop die Frage auf der empfangenden Seite: Bevor der Schluessel
  * gilt, steht im Terminal, an welches Konto der Server gebunden wird. Wer den
  * Kurzcode etwa von einem Screenshot abliest und schneller bestaetigt als der
- * Besitzer, faellt genau hier auf. Wer statt zu antworten abbricht, hat nicht
- * zugestimmt.
+ * Besitzer, faellt genau hier auf. Verbunden wird nur auf ein klares Ja (oder
+ * Enter); wer abbricht oder etwas anderes tippt, hat nicht zugestimmt.
  */
 async function confirmAccount(account, assumeYes) {
   if (assumeYes) return true;
@@ -175,15 +191,33 @@ async function confirmAccount(account, assumeYes) {
   );
   if (answer === null) return true;
   if (answer === ABORTED) return false;
-  return !/^(n|nein|no)$/i.test(answer);
+  return /^(|j|ja|y|yes)$/i.test(answer);
 }
 
 /**
  * Verneint: Der Schluessel ist auf DZPage schon ausgestellt. Nur vergessen
  * hiesse, er bliebe dort aktiv und belegte einen der zehn Plaetze des Kontos.
+ *
+ * Bis der Widerruf durch ist, zaehlen Signale nicht: Ein zweites Strg+C, weil
+ * es dauert, haette ihn sonst abgebrochen. Ist das Terminal schon weg, laeuft
+ * er trotzdem zu Ende.
  */
 async function declineKey(config, key) {
-  const revoked = await revokeKey(config, key);
+  const ignore = () => {};
+  process.stdout.on("error", ignore);
+  process.stderr.on("error", ignore);
+  for (const signal of PROMPT_SIGNALS) process.on(signal, ignore);
+  let revoked;
+  try {
+    try {
+      say("Widerrufe den neuen Schlüssel auf dzpage.com …");
+    } catch {
+      /* Terminal schon weg */
+    }
+    revoked = await revokeKey(config, key);
+  } finally {
+    for (const signal of PROMPT_SIGNALS) process.off(signal, ignore);
+  }
   if (revoked.ok) fail("Nicht verbunden. Der neue Schlüssel ist auf dzpage.com widerrufen; auf diesem Server ändert sich nichts.");
   fail(
     "Nicht verbunden; auf diesem Server ändert sich nichts. " +
@@ -273,10 +307,11 @@ async function adoptAndRegister(config, key, fallbackAccount, { stored = false }
  * ablehnt; einen gueltigen ersetzt nur --force, damit derselbe Befehl ein
  * zweites Mal keine zweite Kopplung erzeugt. Gefragt wird DZPage selbst; den
  * Vermerk von Herzschlag und Abholer (401/403) braucht es nur, wenn DZPage
- * gerade nicht antwortet. Ein veralteter Vermerk wird dabei zurueckgenommen.
+ * gerade nicht antwortet.
  *
- * Ergebnis: "linked" (Anmeldung nachgeholt), "connected" (bleibt) oder
- * "replace" (neu koppeln).
+ * Ergebnis: "linked" (Anmeldung nachgeholt oder veralteten Vermerk
+ * zurueckgenommen; Exit 0, damit dzpage-panel den Dienst neu startet),
+ * "connected" (bleibt) oder "replace" (neu koppeln).
  */
 async function storedKeyDecision(config) {
   const state = await readPanelState(config);
@@ -299,8 +334,15 @@ async function storedKeyDecision(config) {
     say(rejectedNotice(state.rejection.code));
     return "replace";
   }
-  if (state.rejection) await withDatabase(config, (db) => clearKeyRejected(db));
-  say(`Dieser Server ist schon mit DZPage verbunden${state.account ? ` (Konto ${plain(state.account)})` : ""}.`);
+  const account = state.account ? ` (Konto ${plain(state.account)})` : "";
+  if (state.rejection) {
+    // Der Vermerk war veraltet (etwa ein von Hand ersetzter Schluessel), aber
+    // Herzschlag und Abholer haben seinetwegen angehalten.
+    await withDatabase(config, (db) => clearKeyRejected(db));
+    say(`DZPage nimmt den gespeicherten Schlüssel wieder an${account}. Das Panel verbindet sich neu.`);
+    return "linked";
+  }
+  say(`Dieser Server ist schon mit DZPage verbunden${account}.`);
   if (check.status === "unknown") say(`Den Schlüssel konnte DZPage gerade nicht bestätigen (${check.code}).`);
   say("Mit einem anderen Konto verbinden: sudo dzpage-panel link --force");
   return "connected";

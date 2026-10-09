@@ -3,11 +3,11 @@ import { recordEvent } from "../store/events.js";
 
 /**
  * Ob DZPage den gespeicherten Panel-Schluessel noch annimmt. Herzschlag und
- * Abholer halten an, wenn DZPage ihn mit 401/403 und JSON ablehnt (eine
- * Sperrseite davor zaehlt nicht, siehe client.js); damit "dzpage-panel status"
- * und "link" das auch ohne laufenden Dienst wissen, steht die Ablehnung in der
- * Datenbank.
- * Sie verschwindet, sobald ein Schluessel wieder angenommen wird.
+ * Abholer halten an, wenn DZPage ihn mit 401/403 und "revoked" oder
+ * "invalid_key" ablehnt (eine Sperrseite davor zaehlt nicht, siehe client.js).
+ * Damit "dzpage-panel status" und "link" das auch ohne laufenden Dienst
+ * wissen, steht die Ablehnung in der Datenbank. Sie verschwindet, sobald ein
+ * Schluessel wieder angenommen wird.
  */
 
 export const REJECTED_CODES = new Set(["revoked", "invalid_key"]);

@@ -152,13 +152,14 @@ export async function adoptKey({ config, db, key, name = null }) {
  * Einen gerade ausgestellten Schluessel bei DZPage widerrufen, etwa weil der
  * Mensch das angezeigte Konto nicht als seins bestaetigt hat. Ohne das bliebe
  * er dort aktiv und belegte einen der zehn Plaetze des Kontos. Ein schon
- * abgelehnter Schluessel gilt als erledigt.
+ * abgelehnter Schluessel gilt als erledigt. Kurze Fristen: Im Terminal wartet
+ * ein Mensch, der gerade Nein gesagt hat (hoechstens etwa 18 Sekunden).
  */
 export async function revokeKey(config, key, { attempts = 3, sleep = defaultSleep } = {}) {
   const client = new DzpageClient({ baseUrl: config.dzpage.baseUrl, key });
   let result = { ok: false, code: "network" };
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    result = await client.post("/api/panel/v1/revoke", {});
+    result = await client.request("POST", "/api/panel/v1/revoke", {}, { timeoutMs: 5_000 });
     if (result.ok || isRejection(result.code)) return { ok: true };
     if (!["network", "server", "rate_limited"].includes(result.code)) break;
     if (attempt < attempts) await sleep(1_000 * attempt);

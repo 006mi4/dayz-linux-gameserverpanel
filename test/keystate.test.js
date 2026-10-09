@@ -62,19 +62,29 @@ function runAdmin(args, { baseUrl = stub.url } = {}) {
 
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
 
-/** Wie am echten Terminal: Sobald die Frage dasteht, tippt der Mensch `keys`. */
-function runAdminAtTerminal(args, keys) {
+/**
+ * Wie am echten Terminal: Sobald die Frage dasteht, tippt der Mensch `keys`
+ * (Text, oder Liste aus [Pause in ms, Text]). `early` tippt er schon vorher,
+ * waehrend er noch auf die Bestaetigung wartet.
+ */
+function runAdminAtTerminal(args, keys, { early = null } = {}) {
   const command = [process.execPath, ADMIN, ...args].map(quote).join(" ");
   const child = spawn("script", ["-qec", command, "/dev/null"], {
     env: { ...process.env, DZPAGE_BASE_URL: stub.url },
     stdio: ["pipe", "pipe", "pipe"],
   });
+  if (early) child.stdin.write(early);
+  const steps = typeof keys === "string" ? [[150, keys]] : keys;
   let typed = false;
   const done = collect(child, {
     onOutput(output) {
       if (!typed && output.includes("[J/n]")) {
         typed = true;
-        setTimeout(() => child.stdin.write(keys), 150);
+        let delay = 0;
+        for (const [pause, text] of steps) {
+          delay += pause;
+          setTimeout(() => child.stdin.write(text), delay);
+        }
       }
     },
   });
@@ -158,6 +168,40 @@ test("Kennt dzpage.com den Widerruf noch nicht, sagt das Terminal, was zu tun is
   } finally {
     stub.state.noRevoke = false;
   }
+});
+
+test("Ein zweites Strg+C während des Widerrufs bricht ihn nicht ab", { skip: noScript }, async () => {
+  const before = stub.calls.revoke.length;
+  stub.state.revokeDelayMs = 1500;
+  try {
+    const result = await runAdminAtTerminal(["link", "--token", newToken("zweimal")], [
+      [150, "\x03"],
+      [500, "\x03"],
+    ]);
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /Widerrufe den neuen Schlüssel/);
+    assert.match(result.output, /Der neue Schlüssel ist auf dzpage\.com widerrufen/);
+    assert.equal(stub.calls.revoke.length, before + 1);
+  } finally {
+    stub.state.revokeDelayMs = 0;
+  }
+});
+
+test("Was vor der Frage getippt wurde, ist keine Antwort darauf", { skip: noScript }, async () => {
+  // Enter waehrend des Wartens auf die Bestaetigung: Frueher galt das als Ja.
+  const before = stub.calls.revoke.length;
+  const result = await runAdminAtTerminal(["link", "--token", newToken("vorab")], "n\n", { early: "\n" });
+  assert.equal(result.code, 1, result.output);
+  assert.equal(stub.calls.revoke.length, before + 1);
+  assert.equal(storedKey(), null);
+});
+
+test("Eine unklare Antwort verbindet nicht", { skip: noScript }, async () => {
+  const before = stub.calls.revoke.length;
+  const result = await runAdminAtTerminal(["link", "--token", newToken("unklar")], "vielleicht\n");
+  assert.equal(result.code, 1, result.output);
+  assert.equal(stub.calls.revoke.length, before + 1);
+  assert.equal(storedKey(), null);
 });
 
 test("Enter an der Rückfrage verbindet", { skip: noScript }, async () => {
@@ -263,28 +307,35 @@ test("Ein veralteter Vermerk bei gültigem Schlüssel wird zurückgenommen, nich
   await withDb((db) => setSetting(db, KEYS.dzpageKeyRejected, "invalid_key"));
   const token = newToken("veraltet");
   const result = await runAdmin(["link", "--yes", "--token", token]);
-  assert.equal(result.code, 3, result.output);
-  assert.match(result.output, /schon mit DZPage verbunden/);
+  // Exit 0 statt 3: Herzschlag und Abholer hatten wegen des Vermerks
+  // angehalten, und nur nach 0 startet dzpage-panel den Dienst neu.
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /DZPage nimmt den gespeicherten Schlüssel wieder an \(Konto TestKonto\)/);
   assert.equal(storedKey(), key);
   assert.ok(stub.pairing.tokens.has(token), "der Code bleibt unbenutzt");
   assert.equal(await rejection(), null);
 });
 
-test("Eine Sperrseite ohne JSON (Proxy) gilt nicht als Ablehnung des Schlüssels", async () => {
+test("Eine Sperrseite davor (HTML oder JSON ohne Code) gilt nicht als Ablehnung des Schlüssels", async () => {
   const config = loadConfig({ file: env.configFile });
   const db = await openDatabase(config.database);
-  const heartbeat = createHeartbeat({ config, db });
-  const before = stub.calls.htmlForbidden;
-  stub.state.htmlForbidden = true;
   try {
-    heartbeat.start({ immediate: true });
-    await waitFor(() => stub.calls.htmlForbidden > before);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(heartbeat.running, true, "der Herzschlag wartet und versucht es spaeter wieder");
-    assert.equal(await getSetting(db, KEYS.dzpageKeyRejected), null);
+    for (const page of ["html", "json"]) {
+      const heartbeat = createHeartbeat({ config, db });
+      const before = stub.calls.forbidden;
+      stub.state.forbiddenPage = page;
+      try {
+        heartbeat.start({ immediate: true });
+        await waitFor(() => stub.calls.forbidden > before);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.equal(heartbeat.running, true, `${page}: der Herzschlag wartet und versucht es spaeter wieder`);
+        assert.equal(await getSetting(db, KEYS.dzpageKeyRejected), null, page);
+      } finally {
+        stub.state.forbiddenPage = null;
+        heartbeat.stop();
+      }
+    }
   } finally {
-    stub.state.htmlForbidden = false;
-    heartbeat.stop();
     await db.close();
   }
 });

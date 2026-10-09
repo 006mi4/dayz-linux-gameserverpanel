@@ -129,15 +129,16 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     revoke: [],
     /** Anfragen mit abgelehntem Schluessel (401/403). */
     denied: [],
-    /** Anfragen, die die Sperrseite eines Proxys bekamen (state.htmlForbidden). */
-    htmlForbidden: 0,
+    /** Anfragen, die die Sperrseite eines Proxys bekamen (state.forbiddenPage). */
+    forbidden: 0,
   };
   /**
    * failRegister: die naechsten n Anmeldungen scheitern mit 503 (DZPage kurz weg).
    * noReport: dzpage.com kennt den Zustandsbericht noch nicht (404 ohne JSON).
    * noRevoke: dzpage.com kennt den Selbst-Widerruf noch nicht (404 ohne JSON).
-   * htmlForbidden: ein Proxy vor DZPage sperrt mit 403 und einer HTML-Seite.
+   * forbiddenPage: ein Proxy vor DZPage sperrt mit 403, als "html" oder als "json" ohne Code.
    * failHeartbeat: der Herzschlag scheitert mit 503, bevor ein Schluessel geprueft wird.
+   * revokeDelayMs: so lange braucht die Antwort auf einen Widerruf.
    */
   const state = {
     revoked: false,
@@ -145,8 +146,9 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     failRegister: 0,
     noReport: false,
     noRevoke: false,
-    htmlForbidden: false,
+    forbiddenPage: null,
     failHeartbeat: false,
+    revokeDelayMs: 0,
   };
   const queue = [];
   /**
@@ -213,11 +215,15 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
       }
 
       const path = req.url.split("?")[0];
-      if (state.htmlForbidden) {
-        calls.htmlForbidden += 1;
+      if (state.forbiddenPage === "html") {
+        calls.forbidden += 1;
         res.writeHead(403, { "content-type": "text/html" });
         res.end("<!doctype html><title>Forbidden</title>");
         return;
+      }
+      if (state.forbiddenPage === "json") {
+        calls.forbidden += 1;
+        return send(403, { ok: false, message: "Request blocked" });
       }
       if (path === "/api/panel/v1/heartbeat" && state.failHeartbeat) {
         return send(503, { ok: false, error: "unavailable" });
@@ -243,7 +249,8 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
       if (path === "/api/panel/v1/revoke") {
         calls.revoke.push(given);
         keys.revoked.add(given);
-        return send(200, { ok: true });
+        setTimeout(() => send(200, { ok: true }), state.revokeDelayMs);
+        return;
       }
 
       if (path === "/api/panel/v1/register") {

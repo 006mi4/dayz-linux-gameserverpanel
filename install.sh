@@ -527,7 +527,10 @@ if [ "$LINKED" -eq 1 ]; then
   # Mal koppelt so nicht doppelt, einer nach dem Widerrufen aber schon.
   if [ -n "$PAIR_TOKEN" ]; then
     say "Mit DZPage verbinden"
-    pair --token "$PAIR_TOKEN" || warn "Nicht neu verbunden. Spaeter: sudo dzpage-panel link"
+    if ! pair --token "$PAIR_TOKEN"; then
+      LINKED=0
+      warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+    fi
   fi
 elif [ -n "$PAIR_TOKEN" ]; then
   say "Mit DZPage verbinden"
