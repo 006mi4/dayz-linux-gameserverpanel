@@ -4,6 +4,7 @@ import { openDatabase } from "../db/index.js";
 import { KEYS, setSetting } from "../store/settings.js";
 import { recordEvent } from "../store/events.js";
 import { DzpageClient, PANEL_KEY_PREFIX, platformLabel } from "./client.js";
+import { clearKeyRejected, isRejection } from "./keystate.js";
 import { PANEL_VERSION } from "../version.js";
 
 /**
@@ -138,10 +139,46 @@ export async function adoptKey({ config, db, key, name = null }) {
   await setSetting(db, KEYS.dzpageAccount, result.account ?? "");
   await setSetting(db, KEYS.dzpageHeartbeatSeconds, result.heartbeatSeconds ?? 60);
   await setSetting(db, KEYS.dzpageLastSeenAt, Date.now());
+  await clearKeyRejected(db);
   await recordEvent(db, {
     kind: "dzpage.register",
     source: "dzpage",
     message: `Panel bei DZPage angemeldet (${result.account || "Konto unbekannt"})`,
   });
   return { ok: true, panelId: result.panelId, account: result.account ?? "", heartbeatSeconds: result.heartbeatSeconds };
+}
+
+/**
+ * Einen gerade ausgestellten Schluessel bei DZPage widerrufen, etwa weil der
+ * Mensch das angezeigte Konto nicht als seins bestaetigt hat. Ohne das bliebe
+ * er dort aktiv und belegte einen der zehn Plaetze des Kontos. Ein schon
+ * abgelehnter Schluessel gilt als erledigt.
+ */
+export async function revokeKey(config, key, { attempts = 3, sleep = defaultSleep } = {}) {
+  const client = new DzpageClient({ baseUrl: config.dzpage.baseUrl, key });
+  let result = { ok: false, code: "network" };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    result = await client.post("/api/panel/v1/revoke", {});
+    if (result.ok || isRejection(result.code)) return { ok: true };
+    if (!["network", "server", "rate_limited"].includes(result.code)) break;
+    if (attempt < attempts) await sleep(1_000 * attempt);
+  }
+  return result;
+}
+
+/**
+ * Den gespeicherten Schluessel bei DZPage pruefen, mit einem gewoehnlichen
+ * Herzschlag; der braucht die echte Serverzahl, weil DZPage sie uebernimmt.
+ * "valid" heisst angenommen (auch wenn DZPage die Panel-ID nicht mehr kennt:
+ * die meldet der Dienst selbst neu an), "rejected" widerrufen oder unbekannt,
+ * "unknown" nicht pruefbar (Netz, DZPage gestoert).
+ */
+export async function checkStoredKey(config, { panelId, serverCount }) {
+  const result = await new DzpageClient({ baseUrl: config.dzpage.baseUrl, key: config.dzpage.key }).heartbeat({
+    panelId,
+    serverCount,
+  });
+  if (result.ok || result.code === "unknown_panel") return { status: "valid" };
+  if (isRejection(result.code)) return { status: "rejected", code: result.code };
+  return { status: "unknown", code: result.code };
 }

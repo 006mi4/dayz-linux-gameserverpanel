@@ -63,7 +63,10 @@ Den fügst du ins Terminal deines Servers ein (SSH). Er installiert das Panel,
 verbindet es von selbst mit deinem DZPage-Konto und fragt am Ende nach dem
 Steam-Konto, das DayZ besitzt. Bevor es verbindet, zeigt das Terminal den
 Namen des DZPage-Kontos und fragt, ob das deins ist, so wie AirDrop vor dem
-Annehmen fragt. Das war es. Der Kopplungscode gilt einmal und 30 Minuten.
+Annehmen fragt. Antwortest du `n` (oder drückst Strg+C), widerruft das Panel
+den Schlüssel, den DZPage gerade ausgestellt hat; er belegt dann keinen deiner
+zehn Plätze, und auf dem Server ändert sich nichts. Das war es. Der
+Kopplungscode gilt einmal und 30 Minuten.
 
 Als root angemeldet auf einer Maschine ohne `sudo` (ein Debian, bei dessen
 Installation ein root-Passwort gesetzt wurde, hat keins)? Dann `sudo` einfach
@@ -80,7 +83,11 @@ curl -fsSL https://dzpage.com/panel/install.sh | sudo bash
 Am Ende zeigt das Terminal einen Link wie `https://dzpage.com/link?code=K7QF-M2XP`.
 Öffnen, prüfen, dass Name und Adresse dein Server sind, **Verbinden** klicken,
 und das Terminal bestätigt binnen Sekunden. Später oder nach einem widerrufenen
-Schlüssel: `sudo dzpage-panel link`.
+Schlüssel: `sudo dzpage-panel link`. Einen Schlüssel, den DZPage ablehnt, bemerkt
+das Panel selbst (und `sudo dzpage-panel status` zeigt ihn); `link` verbindet
+dann von sich aus neu, ebenso der Befehl von dzpage.com mit einem frischen Code.
+`--force` braucht es nur, um einen Server mit noch gültigem Schlüssel an ein
+anderes Konto zu hängen.
 
 `dzpage.com/panel/install.sh` leitet nur auf `bootstrap.sh` in diesem
 Repository weiter; `https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh`
@@ -138,7 +145,7 @@ Weboberfläche selbst nicht kann:
 |---|---|
 | `sudo dzpage-panel link` | diesen Server mit deinem DZPage-Konto verbinden (Link und Code) |
 | `sudo dzpage-panel steam-login <konto>` | Steam-Anmeldung für die Downloads; das Passwort tippst du direkt in SteamCMD |
-| `sudo dzpage-panel status` | Dienst, Fassung, DZPage-Verbindung, Adresse, offener Einrichtungscode |
+| `sudo dzpage-panel status` | Dienst, Fassung, DZPage-Verbindung (letzter Kontakt oder abgelehnter Schlüssel), Adresse, offener Einrichtungscode |
 | `sudo dzpage-panel setup-code` | Einrichtungscode der lokalen Oberfläche |
 | `sudo dzpage-panel reset-password [name]` | Passwort vergessen: erzeugt ein neues, beendet alle Sitzungen |
 | `sudo dzpage-panel https enable <domain>` | HTTPS für die Oberfläche, auch nachträglich |

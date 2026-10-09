@@ -15,6 +15,9 @@ export const KEYS = {
   dzpageAccount: "dzpage_account",
   dzpageHeartbeatSeconds: "dzpage_heartbeat_seconds",
   dzpageLastSeenAt: "dzpage_last_seen_at",
+  /** DZPage hat den Schluessel abgelehnt: "revoked" oder "invalid_key", und seit wann. */
+  dzpageKeyRejected: "dzpage_key_rejected",
+  dzpageKeyRejectedAt: "dzpage_key_rejected_at",
   runtime: "runtime",
 
   /** Update-Pruefung: Zeitplan und letzter bekannter Stand bei Steam. */

@@ -47,6 +47,7 @@ async function dashboard(rc) {
     KEYS.dzpageAccount,
     KEYS.dzpagePanelId,
     KEYS.dzpageLastSeenAt,
+    KEYS.dzpageKeyRejected,
     KEYS.updateAvailableBuild,
     KEYS.updateCheckedAt,
   ]);
@@ -98,12 +99,17 @@ async function dashboard(rc) {
     ? `${pill("ok", t("common.ready"))} <a href="/steam">${escapeHtml(settings[KEYS.steamAccount] || "")}</a>`
     : `${pill("warn", t("dash.steamPending"))} <a href="/steam">${escapeHtml(t("dash.steamConnect"))}</a>`;
 
-  const dzpageCell = settings[KEYS.dzpagePanelId]
-    ? `${pill("ok", settings[KEYS.dzpageAccount] || t("common.ready"))}
-       <span class="hint">${escapeHtml(
-         t("dash.dzpageLastSeen", { when: relativeTime(t, settings[KEYS.dzpageLastSeenAt]) }),
-       )}</span>`
-    : `${pill("off", t("common.missing"))} <a href="/dzpage">${escapeHtml(t("setup.dzpage.connect"))}</a>`;
+  // Herzschlag und Abholer vermerken, wenn DZPage den Schluessel ablehnt; die
+  // Panel-ID bleibt dabei stehen und hiesse sonst weiter "verbunden".
+  const dzpageCell = settings[KEYS.dzpageKeyRejected]
+    ? `${pill("bad", t("dash.dzpageRejected"))}
+       <span class="hint">${escapeHtml(t("dash.dzpageRejectedHint"))}</span>`
+    : settings[KEYS.dzpagePanelId]
+      ? `${pill("ok", settings[KEYS.dzpageAccount] || t("common.ready"))}
+         <span class="hint">${escapeHtml(
+           t("dash.dzpageLastSeen", { when: relativeTime(t, settings[KEYS.dzpageLastSeenAt]) }),
+         )}</span>`
+      : `${pill("off", t("common.missing"))} <a href="/dzpage">${escapeHtml(t("setup.dzpage.connect"))}</a>`;
 
   const statusRows = [
     [t("dash.status.database"), pill("ok", rc.config.database?.kind === "mysql" ? "MySQL" : "SQLite")],

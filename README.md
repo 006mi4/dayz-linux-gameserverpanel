@@ -78,7 +78,9 @@ curl -fsSL https://dzpage.com/panel/install.sh | sudo bash -s -- --pair dzp_pair
 Paste it into the terminal of your server (SSH). It installs the panel, links
 it to your DZPage account on its own, and at the end asks for the Steam account
 that owns DayZ. Before it links, the terminal shows the DZPage account name and
-asks whether that is yours, the same way AirDrop asks before it accepts. That
+asks whether that is yours, the same way AirDrop asks before it accepts. Answer
+`n` (or press Ctrl+C) and the panel revokes the key DZPage just issued, so it
+does not take up one of your ten places; nothing changes on the server. That
 is all. The pairing code works once and expires after 30 minutes.
 
 Logged in as root on a machine without `sudo` (Debian installed with a root
@@ -95,7 +97,10 @@ curl -fsSL https://dzpage.com/panel/install.sh | sudo bash
 At the end the terminal shows a link like `https://dzpage.com/link?code=K7QF-M2XP`.
 Open it, check that name and address are your server, click **Connect**, and
 the terminal confirms within seconds. Later, or after a revoked key:
-`sudo dzpage-panel link`.
+`sudo dzpage-panel link`. A key that DZPage rejects is noticed by the panel (and
+shown by `sudo dzpage-panel status`); `link` then pairs again on its own, and so
+does the command from dzpage.com with a fresh code. `--force` is only needed to
+move a server whose key still works to another account.
 
 `dzpage.com/panel/install.sh` simply forwards to `bootstrap.sh` in this
 repository; `https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh`
@@ -153,7 +158,7 @@ interface cannot do itself:
 |---|---|
 | `sudo dzpage-panel link` | link this server to your DZPage account (link and code) |
 | `sudo dzpage-panel steam-login <account>` | Steam login for the downloads; you type the password straight into SteamCMD |
-| `sudo dzpage-panel status` | service state, version, DZPage link, address, open setup code |
+| `sudo dzpage-panel status` | service state, version, DZPage connection (last contact, or a rejected key), address, open setup code |
 | `sudo dzpage-panel setup-code` | show the setup code of the local interface |
 | `sudo dzpage-panel reset-password [name]` | forgot the password: generates a new one, ends all sessions |
 | `sudo dzpage-panel https enable <domain>` | HTTPS for the interface, also later |

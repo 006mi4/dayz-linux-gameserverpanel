@@ -157,6 +157,8 @@ export const en = {
   "dash.steamPending": "not signed in",
   "dash.steamConnect": "Sign in to Steam",
   "dash.dzpageLastSeen": "last heartbeat {when} ago",
+  "dash.dzpageRejected": "key rejected",
+  "dash.dzpageRejectedHint": "DZPage no longer accepts the key, for example because it was revoked. Reconnect on the machine: sudo dzpage-panel link",
   "dash.checkedAt": "checked {when} ago",
   "dash.events": "Recent events",
   "dash.eventsEmpty": "Nothing logged yet.",

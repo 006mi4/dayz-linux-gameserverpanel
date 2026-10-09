@@ -263,6 +263,22 @@ test("Übersicht zeigt den Zustand", async () => {
   assert.match(client.lastBody, /not signed in/);
 });
 
+test("Übersicht zeigt einen abgelehnten Schlüssel statt verbunden", async () => {
+  const { deleteSetting, setSetting, KEYS } = await import("../src/store/settings.js");
+  await setSetting(panel.app.db, KEYS.dzpageKeyRejected, "revoked");
+  try {
+    await client.get("/");
+    assert.equal(client.lastStatus, 200);
+    assert.match(client.lastBody, /<span class="pill bad">key rejected<\/span>/);
+    assert.match(client.lastBody, /sudo dzpage-panel link/);
+    assert.doesNotMatch(client.lastBody, /<span class="pill ok">TestKonto<\/span>/);
+  } finally {
+    await deleteSetting(panel.app.db, KEYS.dzpageKeyRejected);
+  }
+  await client.get("/");
+  assert.match(client.lastBody, /<span class="pill ok">TestKonto<\/span>/);
+});
+
 test("Herzschlag meldet sich bei DZPage", async () => {
   panel.app.heartbeat.restart({ immediate: true });
   for (let i = 0; i < 50 && stub.calls.heartbeat.length === 0; i += 1) {

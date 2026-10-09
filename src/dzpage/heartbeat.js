@@ -1,7 +1,7 @@
 import { DzpageClient } from "./client.js";
 import { getSetting, KEYS, setSetting } from "../store/settings.js";
 import { countServers } from "../store/servers.js";
-import { recordEvent } from "../store/events.js";
+import { clearKeyRejected, isRejection, markKeyRejected } from "./keystate.js";
 import { log } from "../log.js";
 
 /**
@@ -22,6 +22,8 @@ export function createHeartbeat(app) {
   let timer = null;
   let stopped = true;
   let backoffMs = 0;
+  /** Zaehlt die Starts, damit ein alter Durchlauf einen neuen nicht anhaelt. */
+  let generation = 0;
 
   function client() {
     return new DzpageClient({ baseUrl: app.config.dzpage.baseUrl, key: app.config.dzpage.key });
@@ -30,6 +32,7 @@ export function createHeartbeat(app) {
   async function tick() {
     timer = null;
     if (stopped) return;
+    const run = generation;
     try {
       const panelId = await getSetting(app.db, KEYS.dzpagePanelId);
       if (!panelId) {
@@ -42,6 +45,7 @@ export function createHeartbeat(app) {
       if (result.ok) {
         backoffMs = 0;
         await setSetting(app.db, KEYS.dzpageLastSeenAt, Date.now());
+        await clearKeyRejected(app.db);
         if (result.heartbeatSeconds) {
           await setSetting(app.db, KEYS.dzpageHeartbeatSeconds, result.heartbeatSeconds);
         }
@@ -56,17 +60,14 @@ export function createHeartbeat(app) {
         if (again.ok) {
           await setSetting(app.db, KEYS.dzpagePanelId, again.panelId);
           await setSetting(app.db, KEYS.dzpageAccount, again.account ?? "");
+        } else if (isRejection(again.code)) {
+          await rejected(again.code, run);
+          return;
         } else {
           backoffMs = Math.min(Math.max(backoffMs * 2, 60_000), MAX_BACKOFF_MS);
         }
-      } else if (result.code === "revoked" || result.code === "invalid_key") {
-        log.error(`DZPage lehnt den Panel-Schluessel ab (${result.code}) — Herzschlag angehalten.`);
-        await recordEvent(app.db, {
-          kind: "dzpage.key",
-          source: "dzpage",
-          message: `Panel-Schlüssel abgelehnt (${result.code})`,
-        });
-        stop();
+      } else if (isRejection(result.code)) {
+        await rejected(result.code, run);
         return;
       } else {
         backoffMs = Math.min(Math.max(backoffMs * 2, 30_000), MAX_BACKOFF_MS);
@@ -77,6 +78,20 @@ export function createHeartbeat(app) {
       log.warn(`Herzschlag abgebrochen: ${err.message}`);
     }
     schedule();
+  }
+
+  /**
+   * Ein widerrufener Schluessel wird nicht wieder gueltig: anhalten, bis "link"
+   * einen neuen bringt. Wurde inzwischen mit einem neuen Schluessel neu
+   * gestartet, laeuft der neue Durchlauf weiter.
+   */
+  async function rejected(code, run) {
+    log.error(`DZPage lehnt den Panel-Schluessel ab (${code}). Herzschlag angehalten.`);
+    try {
+      await markKeyRejected(app.db, code);
+    } finally {
+      if (generation === run) stop();
+    }
   }
 
   async function schedule() {
@@ -105,6 +120,7 @@ export function createHeartbeat(app) {
     /** Erster Herzschlag nach kurzer Verzoegerung, damit der Start nicht daran haengt. */
     start({ immediate = false } = {}) {
       if (!app.db || !app.config.dzpage.key) return;
+      generation += 1;
       stopped = false;
       backoffMs = 0;
       if (timer) clearTimeout(timer);

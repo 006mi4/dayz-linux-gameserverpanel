@@ -4,7 +4,7 @@
 #
 #   sudo dzpage-panel link                    mit dem DZPage-Konto verbinden (Link + Code)
 #   sudo dzpage-panel steam-login <konto>     Steam-Anmeldung fuer die Downloads
-#   sudo dzpage-panel status                  Dienst, Fassung, Adresse, offener Einrichtungscode
+#   sudo dzpage-panel status                  Dienst, Fassung, DZPage-Verbindung, Adresse, Code
 #   sudo dzpage-panel setup-code              Einrichtungscode der lokalen Oberflaeche
 #   sudo dzpage-panel reset-password [name]   neues Passwort erzeugen (alle Sitzungen enden)
 #   sudo dzpage-panel https enable <domain>   Oberflaeche ueber HTTPS (Caddy, Let's Encrypt)
@@ -43,15 +43,22 @@ panel_port() {
 }
 
 cmd_status() {
-  local version state domain
+  local version state domain dzpage
   version=$(sed -n 's/.*PANEL_VERSION *= *"\([^"]*\)".*/\1/p' "$APP_DIR/src/version.js" 2>/dev/null | head -1 || true)
   state=$(systemctl is-active dzpage-panel 2>/dev/null || true)
   printf 'Panel:      %s (%s)\n' "${version:-?}" "$state"
-  if grep -q '"key": *"dzp_panel_' "$CONFIG_DIR/panel.json" 2>/dev/null; then
-    printf 'DZPage:     verbunden\n'
-  else
-    printf 'DZPage:     nicht verbunden (sudo dzpage-panel link)\n'
+  # Ein Schluessel in panel.json heisst noch nicht verbunden: Ob DZPage ihn
+  # annimmt (letzter Herzschlag) oder abgelehnt hat, steht in der Datenbank.
+  # Protokollzeilen des Verwaltungsprogramms beginnen mit "[".
+  dzpage=$(admin dzpage-status 2>/dev/null | grep -v '^\[' | tail -n 1 || true)
+  if [ -z "$dzpage" ]; then
+    if grep -q '"key": *"dzp_panel_' "$CONFIG_DIR/panel.json" 2>/dev/null; then
+      dzpage='Schlüssel hinterlegt, Zustand nicht lesbar (sudo dzpage-panel logs)'
+    else
+      dzpage='nicht verbunden (sudo dzpage-panel link)'
+    fi
   fi
+  printf 'DZPage:     %s\n' "$dzpage"
   if [ -f "$CONFIG_DIR/https-domain" ]; then
     domain=$(cat "$CONFIG_DIR/https-domain")
     printf 'Oberfläche: https://%s\n' "$domain"

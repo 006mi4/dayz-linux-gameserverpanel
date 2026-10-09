@@ -126,18 +126,47 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     reportMisses: 0,
     polls: 0,
     pair: [],
+    revoke: [],
+    /** Anfragen mit abgelehntem Schluessel (401/403). */
+    denied: [],
+    /** Anfragen, die die Sperrseite eines Proxys bekamen (state.htmlForbidden). */
+    htmlForbidden: 0,
   };
   /**
    * failRegister: die naechsten n Anmeldungen scheitern mit 503 (DZPage kurz weg).
    * noReport: dzpage.com kennt den Zustandsbericht noch nicht (404 ohne JSON).
+   * noRevoke: dzpage.com kennt den Selbst-Widerruf noch nicht (404 ohne JSON).
+   * htmlForbidden: ein Proxy vor DZPage sperrt mit 403 und einer HTML-Seite.
+   * failHeartbeat: der Herzschlag scheitert mit 503, bevor ein Schluessel geprueft wird.
    */
-  const state = { revoked: false, unknownPanel: false, failRegister: 0, noReport: false };
+  const state = {
+    revoked: false,
+    unknownPanel: false,
+    failRegister: 0,
+    noReport: false,
+    noRevoke: false,
+    htmlForbidden: false,
+    failHeartbeat: false,
+  };
   const queue = [];
   /**
    * Kopplung wie auf DZPage: Einmal-Codes (dzp_pair_...) und Geraete-Codes.
    * Ein Geraete-Code wartet, bis der Test ihn mit approve()/deny() entscheidet.
    */
-  const pairing = { tokens: new Set(["dzp_pair_gueltig_0123456789"]), devices: new Map(), issued: 0 };
+  const pairing = { tokens: new Set(["dzp_pair_gueltig_0123456789"]), devices: new Map(), issued: 0, freshKeys: false };
+  /**
+   * Gueltige und einzeln widerrufene Schluessel. Mit pairing.freshKeys gibt
+   * jede Kopplung wie das Original einen eigenen Schluessel heraus, sonst
+   * immer denselben.
+   */
+  const keys = { valid: new Set([key]), revoked: new Set() };
+  const issueKey = () => {
+    pairing.issued += 1;
+    if (!pairing.freshKeys) return key;
+    const fresh = `dzp_panel_frisch${String(pairing.issued).padStart(4, "0")}0123456789abcdef`;
+    keys.valid.add(fresh);
+    return fresh;
+  };
 
   const server = createServer((req, res) => {
     let body = "";
@@ -156,8 +185,7 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
         if (pairPath === "/api/panel/v1/pair/redeem") {
           if (!pairing.tokens.has(payload.token)) return send(400, { ok: false, error: "expired_token" });
           pairing.tokens.delete(payload.token);
-          pairing.issued += 1;
-          return send(200, { ok: true, key, account });
+          return send(200, { ok: true, key: issueKey(), account });
         }
         if (pairPath === "/api/panel/v1/pair/start") {
           const deviceCode = `geraet-${pairing.devices.size + 1}-${"x".repeat(40)}`;
@@ -177,21 +205,46 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
           if (!device) return send(200, { ok: true, status: "expired" });
           if (device.status === "approved") {
             pairing.devices.delete(payload.deviceCode);
-            pairing.issued += 1;
-            return send(200, { ok: true, status: "approved", key, account });
+            return send(200, { ok: true, status: "approved", key: issueKey(), account });
           }
           return send(200, { ok: true, status: device.status });
         }
         return send(404, { ok: false, error: "not_found" });
       }
 
+      const path = req.url.split("?")[0];
+      if (state.htmlForbidden) {
+        calls.htmlForbidden += 1;
+        res.writeHead(403, { "content-type": "text/html" });
+        res.end("<!doctype html><title>Forbidden</title>");
+        return;
+      }
+      if (path === "/api/panel/v1/heartbeat" && state.failHeartbeat) {
+        return send(503, { ok: false, error: "unavailable" });
+      }
+      if (path === "/api/panel/v1/revoke" && state.noRevoke) {
+        res.writeHead(404, { "content-type": "text/html" });
+        res.end("<!doctype html><title>404</title>");
+        return;
+      }
+
       const auth = req.headers.authorization || "";
       const given = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-      if (given !== key) return send(401, { ok: false, error: "invalid_key" });
-      if (state.revoked) return send(403, { ok: false, error: "revoked" });
-
-      const path = req.url.split("?")[0];
       const payload = body ? JSON.parse(body) : {};
+      if (!keys.valid.has(given)) {
+        calls.denied.push({ path, payload });
+        return send(401, { ok: false, error: "invalid_key" });
+      }
+      if (state.revoked || keys.revoked.has(given)) {
+        calls.denied.push({ path, payload });
+        return send(403, { ok: false, error: "revoked" });
+      }
+
+      if (path === "/api/panel/v1/revoke") {
+        calls.revoke.push(given);
+        keys.revoked.add(given);
+        return send(200, { ok: true });
+      }
 
       if (path === "/api/panel/v1/register") {
         if (state.failRegister > 0) {
@@ -248,6 +301,7 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     calls,
     state,
     pairing,
+    keys,
     /** Den offenen Geraete-Code bestaetigen oder ablehnen, wie der Mensch auf dzpage.com. */
     decideDevice(status) {
       for (const device of pairing.devices.values()) {

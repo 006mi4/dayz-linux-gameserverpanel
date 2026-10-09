@@ -5,6 +5,7 @@ import { registerServerWithDzpage } from "./servers.js";
 import { getSetting, KEYS } from "../store/settings.js";
 import { checkServerInput, countServers, createServer, findPortConflict, getServer, serverDir } from "../store/servers.js";
 import { recordEvent } from "../store/events.js";
+import { isRejection, markKeyRejected } from "./keystate.js";
 import { runtimeFor } from "../runtime/index.js";
 import { steamProgress, updateGameFiles } from "../servers/install.js";
 import { writeServerFiles } from "../servers/config.js";
@@ -120,6 +121,8 @@ export function createPoller(app) {
   let timer = null;
   let backoffMs = 0;
   let inFlight = null;
+  /** Zaehlt die Starts, damit ein alter Durchlauf einen neuen nicht anhaelt. */
+  let generation = 0;
   /** Letzter Auftrag je Server; der naechste haengt sich dahinter. */
   const queues = new Map();
 
@@ -357,6 +360,7 @@ export function createPoller(app) {
   async function round() {
     timer = null;
     if (stopped) return;
+    const run = generation;
 
     const panelId = await getSetting(app.db, KEYS.dzpagePanelId);
     if (!panelId || !app.config.dzpage.key) {
@@ -372,9 +376,14 @@ export function createPoller(app) {
     );
 
     if (!result.ok) {
-      if (result.code === "revoked" || result.code === "invalid_key") {
-        log.error(`DZPage lehnt den Panel-Schluessel ab (${result.code}) — Abholer angehalten.`);
-        stop();
+      if (isRejection(result.code)) {
+        log.error(`DZPage lehnt den Panel-Schluessel ab (${result.code}). Abholer angehalten.`);
+        try {
+          await markKeyRejected(app.db, result.code);
+        } finally {
+          // Mit neuem Schluessel neu gestartet: der neue Durchlauf bleibt.
+          if (generation === run) stop();
+        }
         return;
       }
       backoffMs = Math.min(Math.max(backoffMs * 2, 15_000), MAX_BACKOFF_MS);
@@ -426,6 +435,7 @@ export function createPoller(app) {
   return {
     start() {
       if (!app.db || !app.config.dzpage.key) return;
+      generation += 1;
       stopped = false;
       backoffMs = 0;
       schedule(1_000);

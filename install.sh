@@ -522,9 +522,13 @@ pair() {
 }
 
 if [ "$LINKED" -eq 1 ]; then
-  # Derselbe Befehl ein zweites Mal soll nicht neu koppeln (zweiter Schluessel,
-  # oder "nicht verbunden", sobald der Code verbraucht ist).
-  [ -n "$PAIR_TOKEN" ] && note "Schon mit DZPage verbunden. Neu verbinden: sudo dzpage-panel link --force"
+  # Schon ein Schluessel da. Mit Code fragt link bei DZPage nach und ersetzt
+  # ihn nur, wenn DZPage ihn ablehnt (widerrufen): Derselbe Befehl ein zweites
+  # Mal koppelt so nicht doppelt, einer nach dem Widerrufen aber schon.
+  if [ -n "$PAIR_TOKEN" ]; then
+    say "Mit DZPage verbinden"
+    pair --token "$PAIR_TOKEN" || warn "Nicht neu verbunden. Spaeter: sudo dzpage-panel link"
+  fi
 elif [ -n "$PAIR_TOKEN" ]; then
   say "Mit DZPage verbinden"
   if pair --token "$PAIR_TOKEN"; then

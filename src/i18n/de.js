@@ -158,6 +158,8 @@ export const de = {
   "dash.steamPending": "nicht angemeldet",
   "dash.steamConnect": "Bei Steam anmelden",
   "dash.dzpageLastSeen": "letzter Herzschlag vor {when}",
+  "dash.dzpageRejected": "Schlüssel abgelehnt",
+  "dash.dzpageRejectedHint": "DZPage nimmt den Schlüssel nicht mehr an, etwa weil er widerrufen wurde. Neu verbinden auf der Maschine: sudo dzpage-panel link",
   "dash.checkedAt": "zuletzt geprüft vor {when}",
   "dash.events": "Letzte Ereignisse",
   "dash.eventsEmpty": "Noch nichts protokolliert.",

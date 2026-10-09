@@ -67,7 +67,11 @@ export class DzpageClient {
     if (response.ok && payload?.ok) return { ok: true, ...payload };
     if (response.status === 429) return { ok: false, code: "rate_limited" };
     if (response.status === 401 || response.status === 403) {
-      return { ok: false, code: payload?.error === "revoked" ? "revoked" : payload?.error || "invalid_key" };
+      // DZPage lehnt einen Schluessel immer mit JSON ab. Eine Seite ohne JSON
+      // kam von davor (Proxy, Cloudflare) und sagt nichts ueber den Schluessel:
+      // dann wie eine Stoerung warten, statt fuer immer anzuhalten.
+      if (!payload) return { ok: false, code: "server", status: response.status };
+      return { ok: false, code: payload.error === "revoked" ? "revoked" : payload.error || "invalid_key" };
     }
     if (response.status === 400) return { ok: false, code: payload?.error || "bad_request" };
     // Ohne JSON-Antwort gibt es den Endpunkt nicht (aelteres dzpage.com); das

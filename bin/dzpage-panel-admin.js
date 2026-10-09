@@ -1,24 +1,29 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { ReadStream } from "node:tty";
 import { loadConfig, saveConfig } from "../src/config.js";
 import { openDatabase } from "../src/db/index.js";
 import { findUserByUsername, setPassword } from "../src/store/users.js";
 import { deleteOtherSessions } from "../src/store/sessions.js";
 import { getSetting, KEYS, setSetting } from "../src/store/settings.js";
 import { recordEvent } from "../src/store/events.js";
+import { countServers } from "../src/store/servers.js";
 import { ACCOUNT_PATTERN, ensureSteamCmd, verifySession } from "../src/steam/steamcmd.js";
 import { STEAM_HOME } from "../src/paths.js";
 import {
   adoptKey,
+  checkStoredKey,
   ensureDatabase,
   isPairToken,
   isPanelKey,
   redeemPairToken,
+  revokeKey,
   startDevicePairing,
   waitForApproval,
 } from "../src/dzpage/pairing.js";
+import { clearKeyRejected, isRejection, markKeyRejected, readKeyRejection } from "../src/dzpage/keystate.js";
 
 /**
  * Verwaltung von der Kommandozeile, fuer das, was ohne Browser gehen muss.
@@ -27,10 +32,12 @@ import {
  *
  *   link [--token dzp_pair_...] [--force] [--yes]   mit dem DZPage-Konto koppeln
  *                                           (--yes: ohne Rueckfrage nach dem Konto)
+ *   dzpage-status                           Verbindung zu DZPage in einer Zeile
  *   steam-login <konto>                     SteamCMD-Anmeldung im Terminal
  *   reset-password [benutzer]               neues Passwort erzeugen
  *
- * Exit-Codes: 0 erledigt, 1 Fehler, 3 schon gekoppelt (link ohne --force).
+ * Exit-Codes: 0 erledigt, 1 Fehler, 3 schon gekoppelt (link ohne --force,
+ * und DZPage nimmt den gespeicherten Schluessel noch an).
  */
 
 function fail(message, code = 1) {
@@ -95,61 +102,128 @@ function plain(value) {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
 }
 
+/** Strg+C, Strg+D oder ein aufgelegtes Terminal an der Rueckfrage. */
+const ABORTED = Symbol("abgebrochen");
+const PROMPT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 /**
  * Eine Frage direkt an das Terminal, nicht an stdin: Bei "curl ... | sudo bash"
- * ist stdin das Skript. Ohne Terminal (Automatisierung) gibt es keine Antwort,
- * und dann gilt die Voreinstellung.
+ * ist stdin das Skript. Ohne Terminal (Automatisierung) gibt es keine Antwort
+ * (null), und dann gilt die Voreinstellung.
+ *
+ * Gelesen wird, ohne den Prozess zu blockieren: Ein blockierendes Lesen hielte
+ * auch Strg+C auf, bis jemand Enter drueckt. So kommt ein Abbruch als ABORTED
+ * zurueck, und der Aufrufer kann noch aufraeumen.
  */
 function askTerminal(question) {
   let fd;
   try {
     fd = openSync("/dev/tty", "r+");
   } catch {
-    return null;
+    return Promise.resolve(null);
   }
-  try {
-    writeSync(fd, question);
-    const buffer = Buffer.alloc(256);
+  return new Promise((resolve) => {
+    let input = null;
     let answer = "";
-    while (!answer.includes("\n")) {
-      const read = readSync(fd, buffer, 0, buffer.length, null);
-      if (read <= 0) break;
-      answer += buffer.toString("utf8", 0, read);
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      for (const signal of PROMPT_SIGNALS) process.off(signal, onSignal);
+      // Der Lesestrom schliesst seinen Deskriptor selbst.
+      if (input) input.destroy();
+      else closeSync(fd);
+      resolve(value);
+    };
+    const onSignal = () => {
+      try {
+        writeSync(fd, "\n");
+      } catch {
+        /* Terminal schon weg */
+      }
+      finish(ABORTED);
+    };
+    for (const signal of PROMPT_SIGNALS) process.on(signal, onSignal);
+    try {
+      writeSync(fd, question);
+      input = new ReadStream(fd);
+    } catch {
+      finish(ABORTED);
+      return;
     }
-    return answer.split("\n")[0].trim();
-  } catch {
-    return null;
-  } finally {
-    closeSync(fd);
-  }
+    input.setEncoding("utf8");
+    input.on("data", (chunk) => {
+      answer += chunk;
+      if (answer.includes("\n")) finish(answer.split("\n")[0].trim());
+    });
+    input.on("end", () => finish(ABORTED));
+    input.on("error", () => finish(ABORTED));
+  });
 }
 
 /**
  * Wie bei AirDrop die Frage auf der empfangenden Seite: Bevor der Schluessel
  * gilt, steht im Terminal, an welches Konto der Server gebunden wird. Wer den
  * Kurzcode etwa von einem Screenshot abliest und schneller bestaetigt als der
- * Besitzer, faellt genau hier auf.
+ * Besitzer, faellt genau hier auf. Wer statt zu antworten abbricht, hat nicht
+ * zugestimmt.
  */
-function confirmAccount(account, assumeYes) {
+async function confirmAccount(account, assumeYes) {
   if (assumeYes) return true;
-  const answer = askTerminal(
+  const answer = await askTerminal(
     `\nDer Server wird mit dem DZPage-Konto »${plain(account) || "?"}« verbunden. Ist das dein Konto? [J/n] `,
   );
   if (answer === null) return true;
+  if (answer === ABORTED) return false;
   return !/^(n|nein|no)$/i.test(answer);
 }
 
+/**
+ * Verneint: Der Schluessel ist auf DZPage schon ausgestellt. Nur vergessen
+ * hiesse, er bliebe dort aktiv und belegte einen der zehn Plaetze des Kontos.
+ */
+async function declineKey(config, key) {
+  const revoked = await revokeKey(config, key);
+  if (revoked.ok) fail("Nicht verbunden. Der neue Schlüssel ist auf dzpage.com widerrufen; auf diesem Server ändert sich nichts.");
+  fail(
+    "Nicht verbunden; auf diesem Server ändert sich nichts. " +
+      `Den neuen Schlüssel (${key.slice(0, 16)}…) konnte das Panel auf dzpage.com nicht widerrufen (${revoked.code}). ` +
+      "Ist es dein Konto, widerrufe ihn dort unter RCon bei den Panel-Schlüsseln.",
+  );
+}
+
 async function readPanelState(config) {
-  if (!config.database) return { panelId: null, account: "" };
+  const empty = { panelId: null, account: "", rejection: null, lastSeenAt: null, heartbeatSeconds: null, serverCount: 0 };
+  if (!config.database) return empty;
   const db = await openDatabase(config.database);
+  const read = (name) => getSetting(db, name).catch(() => null);
   try {
     return {
-      panelId: await getSetting(db, KEYS.dzpagePanelId).catch(() => null),
-      account: (await getSetting(db, KEYS.dzpageAccount).catch(() => null)) || "",
+      panelId: await read(KEYS.dzpagePanelId),
+      account: (await read(KEYS.dzpageAccount)) || "",
+      rejection: await readKeyRejection(db).catch(() => null),
+      lastSeenAt: Number(await read(KEYS.dzpageLastSeenAt)) || null,
+      heartbeatSeconds: Number(await read(KEYS.dzpageHeartbeatSeconds)) || null,
+      serverCount: await countServers(db).catch(() => 0),
     };
   } finally {
     await db.close().catch(() => undefined);
   }
+}
+
+async function withDatabase(config, fn) {
+  const db = await ensureDatabase(config);
+  try {
+    return await fn(db);
+  } finally {
+    await db.close().catch(() => undefined);
+  }
+}
+
+function rejectedNotice(code) {
+  return code === "revoked"
+    ? "Der gespeicherte Schlüssel wurde auf dzpage.com widerrufen. Verbinde neu …"
+    : "DZPage kennt den gespeicherten Schlüssel nicht mehr. Verbinde neu …";
 }
 
 /**
@@ -157,12 +231,19 @@ async function readPanelState(config) {
  * (Netz, DZPage kurz weg), bleibt der Schluessel trotzdem gespeichert: DZPage
  * gibt ihn genau einmal heraus, und ein zweiter "link"-Aufruf holt die
  * Anmeldung nach, statt eine neue Kopplung zu brauchen.
+ *
+ * `stored`: der Schluessel liegt schon in der Konfiguration. Lehnt DZPage ihn
+ * ab, ist das kein Fehler, sondern der Anlass fuer eine neue Kopplung.
  */
-async function adoptAndRegister(config, key, fallbackAccount) {
+async function adoptAndRegister(config, key, fallbackAccount, { stored = false } = {}) {
   const db = await ensureDatabase(config);
   try {
     const adopted = await adoptKey({ config, db, key });
     if (!adopted.ok) {
+      if (stored && isRejection(adopted.code)) {
+        await markKeyRejected(db, adopted.code, { source: "cli" });
+        return { rejected: adopted.code };
+      }
       if (["network", "server", "rate_limited"].includes(adopted.code)) {
         config.dzpage.key = key;
         saveConfig(config);
@@ -181,9 +262,48 @@ async function adoptAndRegister(config, key, fallbackAccount) {
     });
     say("");
     say(`Verbunden mit dem DZPage-Konto ${plain(account)}. Der Server erscheint jetzt auf dzpage.com unter RCon.`);
+    return { ok: true };
   } finally {
     await db.close().catch(() => undefined);
   }
+}
+
+/**
+ * Es liegt schon ein Schluessel da. Neu gekoppelt wird nur, wenn DZPage ihn
+ * ablehnt; einen gueltigen ersetzt nur --force, damit derselbe Befehl ein
+ * zweites Mal keine zweite Kopplung erzeugt. Gefragt wird DZPage selbst; den
+ * Vermerk von Herzschlag und Abholer (401/403) braucht es nur, wenn DZPage
+ * gerade nicht antwortet. Ein veralteter Vermerk wird dabei zurueckgenommen.
+ *
+ * Ergebnis: "linked" (Anmeldung nachgeholt), "connected" (bleibt) oder
+ * "replace" (neu koppeln).
+ */
+async function storedKeyDecision(config) {
+  const state = await readPanelState(config);
+  if (!state.panelId) {
+    // Schluessel da, Anmeldung fehlt: die letzte Kopplung brach nach dem
+    // Abholen ab. Nachholen, ohne einen neuen Code zu brauchen.
+    say("Schlüssel ist vorhanden, die Anmeldung bei DZPage fehlt noch. Hole sie nach …");
+    const registered = await adoptAndRegister(config, config.dzpage.key, "", { stored: true });
+    if (!registered.rejected) return "linked";
+    say(rejectedNotice(registered.rejected));
+    return "replace";
+  }
+  const check = await checkStoredKey(config, { panelId: state.panelId, serverCount: state.serverCount });
+  if (check.status === "rejected") {
+    await withDatabase(config, (db) => markKeyRejected(db, check.code, { source: "cli" }));
+    say(rejectedNotice(check.code));
+    return "replace";
+  }
+  if (check.status === "unknown" && state.rejection) {
+    say(rejectedNotice(state.rejection.code));
+    return "replace";
+  }
+  if (state.rejection) await withDatabase(config, (db) => clearKeyRejected(db));
+  say(`Dieser Server ist schon mit DZPage verbunden${state.account ? ` (Konto ${plain(state.account)})` : ""}.`);
+  if (check.status === "unknown") say(`Den Schlüssel konnte DZPage gerade nicht bestätigen (${check.code}).`);
+  say("Mit einem anderen Konto verbinden: sudo dzpage-panel link --force");
+  return "connected";
 }
 
 async function link(config, args) {
@@ -194,17 +314,9 @@ async function link(config, args) {
   if (tokenIndex >= 0 && !token) fail("Nach --token fehlt der Kopplungscode von dzpage.com.");
 
   if (config.dzpage.key && !force) {
-    const state = await readPanelState(config);
-    if (!state.panelId) {
-      // Schluessel da, Anmeldung fehlt: die letzte Kopplung brach nach dem
-      // Abholen ab. Nachholen, ohne einen neuen Code zu brauchen.
-      say("Schlüssel ist vorhanden, die Anmeldung bei DZPage fehlt noch. Hole sie nach …");
-      await adoptAndRegister(config, config.dzpage.key, "");
-      return;
-    }
-    say(`Dieser Server ist schon mit DZPage verbunden${state.account ? ` (Konto ${plain(state.account)})` : ""}.`);
-    say("Neu verbinden, etwa nach einem widerrufenen Schlüssel: sudo dzpage-panel link --force");
-    process.exit(3);
+    const decision = await storedKeyDecision(config);
+    if (decision === "linked") return;
+    if (decision === "connected") process.exit(3);
   }
 
   let granted;
@@ -230,10 +342,57 @@ async function link(config, args) {
   }
 
   if (!isPanelKey(granted.key)) fail("DZPage hat eine unerwartete Antwort geschickt. Bitte später erneut versuchen.");
-  if (!confirmAccount(granted.account, assumeYes)) {
-    fail("Nicht verbunden. Der Schlüssel wird verworfen; auf diesem Server ändert sich nichts.");
-  }
+  if (!(await confirmAccount(granted.account, assumeYes))) await declineKey(config, granted.key);
   await adoptAndRegister(config, granted.key, granted.account);
+}
+
+/* ---------------------------------------------------------------- Zustand */
+
+/** Datum und Uhrzeit in der Zeitzone der Maschine. */
+function formatTime(ms) {
+  const d = new Date(ms);
+  const two = (n) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+function ago(ms) {
+  const minutes = Math.round(Math.max(0, Date.now() - ms) / 60_000);
+  if (minutes < 1) return "vor weniger als einer Minute";
+  if (minutes < 90) return minutes === 1 ? "vor 1 Minute" : `vor ${minutes} Minuten`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `vor ${hours} Stunden`;
+  return `vor ${Math.round(hours / 24)} Tagen`;
+}
+
+/**
+ * Die Zeile "DZPage:" von "dzpage-panel status". Ein Schluessel in panel.json
+ * heisst noch nicht verbunden: Massgeblich sind die Ablehnung, die Herzschlag
+ * und Abholer vermerken, und der letzte gelungene Herzschlag.
+ */
+async function dzpageStatus(config) {
+  if (!config.dzpage.key) return "nicht verbunden (sudo dzpage-panel link)";
+  let state;
+  try {
+    state = await readPanelState(config);
+  } catch (err) {
+    return `Schlüssel hinterlegt, Zustand nicht lesbar (${plain(err.message)})`;
+  }
+  if (state.rejection) {
+    const why = state.rejection.code === "revoked" ? "auf dzpage.com widerrufen" : "DZPage kennt ihn nicht";
+    const since = state.rejection.at ? ` seit ${formatTime(state.rejection.at)}` : "";
+    return `Schlüssel abgelehnt (${why})${since}. Neu verbinden: sudo dzpage-panel link`;
+  }
+  if (!state.panelId) return "Schlüssel hinterlegt, Anmeldung bei DZPage fehlt (sudo dzpage-panel link)";
+  const account = state.account ? ` (Konto ${plain(state.account)})` : "";
+  if (!state.lastSeenAt) return `Schlüssel hinterlegt${account}, noch kein Kontakt mit DZPage`;
+  const contact = `letzter Kontakt ${formatTime(state.lastSeenAt)} (${ago(state.lastSeenAt)})`;
+  // Drei verpasste Herzschlaege, mindestens fuenf Minuten: Ein Neustart des
+  // Dienstes allein soll nicht nach Stoerung aussehen.
+  const staleAfterMs = Math.max(3 * (state.heartbeatSeconds || 60), 300) * 1000;
+  if (Date.now() - state.lastSeenAt > staleAfterMs) {
+    return `Schlüssel hinterlegt${account}, aber ${contact}. Protokoll: sudo dzpage-panel logs`;
+  }
+  return `verbunden${account}, ${contact}`;
 }
 
 /* ------------------------------------------------------------------ Steam */
@@ -282,5 +441,6 @@ const config = loadConfig({ generateSecrets: true });
 
 if (command === "reset-password") await resetPassword(config, rest[0]);
 else if (command === "link") await link(config, rest);
+else if (command === "dzpage-status") say(await dzpageStatus(config));
 else if (command === "steam-login") await steamLogin(config, rest[0]);
-else fail("Aufruf: dzpage-panel-admin.js link [--token ...] [--force] | steam-login <konto> | reset-password [benutzer]");
+else fail("Aufruf: dzpage-panel-admin.js link [--token ...] [--force] | dzpage-status | steam-login <konto> | reset-password [benutzer]");
