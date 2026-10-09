@@ -100,7 +100,9 @@ the terminal confirms within seconds. Later, or after a revoked key:
 `sudo dzpage-panel link`. A key that DZPage rejects is noticed by the panel (and
 shown by `sudo dzpage-panel status`); `link` then pairs again on its own, and so
 does the command from dzpage.com with a fresh code. `--force` is only needed to
-move a server whose key still works to another account.
+move a server whose key still works to another account. The panel then revokes
+the old key on dzpage.com, unless another machine still uses it (a key created
+by hand can sit on several).
 
 `dzpage.com/panel/install.sh` simply forwards to `bootstrap.sh` in this
 repository; `https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh`
@@ -588,6 +590,11 @@ those too (not reversible):
 ```bash
 sudo dzpage-panel uninstall --purge
 ```
+
+Before that, `--purge` revokes this machine’s DZPage key on dzpage.com, unless
+another machine still uses it; otherwise it would stay active with nobody able
+to use it. Without `--purge` the key stays valid, so a new install is connected
+again.
 
 Docker install:
 

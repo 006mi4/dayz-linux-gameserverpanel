@@ -87,7 +87,9 @@ Schlüssel: `sudo dzpage-panel link`. Einen Schlüssel, den DZPage ablehnt, beme
 das Panel selbst (und `sudo dzpage-panel status` zeigt ihn); `link` verbindet
 dann von sich aus neu, ebenso der Befehl von dzpage.com mit einem frischen Code.
 `--force` braucht es nur, um einen Server mit noch gültigem Schlüssel an ein
-anderes Konto zu hängen.
+anderes Konto zu hängen. Den alten Schlüssel widerruft das Panel danach auf
+dzpage.com, sofern ihn keine andere Maschine benutzt (ein von Hand angelegter
+Schlüssel kann auf mehreren stecken).
 
 `dzpage.com/panel/install.sh` leitet nur auf `bootstrap.sh` in diesem
 Repository weiter; `https://raw.githubusercontent.com/006mi4/dayz-linux-gameserverpanel/main/bootstrap.sh`
@@ -596,6 +598,11 @@ setzt dort wieder auf. Auch das löschen (nicht umkehrbar):
 ```bash
 sudo dzpage-panel uninstall --purge
 ```
+
+Vorher widerruft `--purge` den DZPage-Schlüssel dieser Maschine auf dzpage.com,
+sofern ihn keine andere Maschine benutzt; sonst bliebe er dort aktiv, ohne dass
+ihn noch jemand verwenden kann. Ohne `--purge` bleibt er gültig, damit eine neue
+Installation wieder verbunden ist.
 
 Docker-Weg:
 

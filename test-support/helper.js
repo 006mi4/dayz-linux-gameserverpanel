@@ -127,6 +127,8 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     polls: 0,
     pair: [],
     revoke: [],
+    /** Der Inhalt jeder Widerrufs-Anfrage, in derselben Reihenfolge wie revoke. */
+    revokeBodies: [],
     /** Anfragen mit abgelehntem Schluessel (401/403). */
     denied: [],
     /** Anfragen, die die Sperrseite eines Proxys bekamen (state.forbiddenPage). */
@@ -159,9 +161,10 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
   /**
    * Gueltige und einzeln widerrufene Schluessel. Mit pairing.freshKeys gibt
    * jede Kopplung wie das Original einen eigenen Schluessel heraus, sonst
-   * immer denselben.
+   * immer denselben. `shared`: Schluessel, die laut DZPage noch eine andere
+   * Maschine benutzt; ein Widerruf laesst sie stehen.
    */
-  const keys = { valid: new Set([key]), revoked: new Set() };
+  const keys = { valid: new Set([key]), revoked: new Set(), shared: new Set() };
   const issueKey = () => {
     pairing.issued += 1;
     if (!pairing.freshKeys) return key;
@@ -248,8 +251,13 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
 
       if (path === "/api/panel/v1/revoke") {
         calls.revoke.push(given);
+        calls.revokeBodies.push(payload);
+        if (keys.shared.has(given)) {
+          setTimeout(() => send(200, { ok: true, revoked: false, shared: true }), state.revokeDelayMs);
+          return;
+        }
         keys.revoked.add(given);
-        setTimeout(() => send(200, { ok: true }), state.revokeDelayMs);
+        setTimeout(() => send(200, { ok: true, revoked: true }), state.revokeDelayMs);
         return;
       }
 

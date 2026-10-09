@@ -429,3 +429,67 @@ test("status ohne Schlüssel und mit Schlüssel ohne Anmeldung", async () => {
   saveConfig(config);
   assert.equal(await status(), "nicht verbunden (sudo dzpage-panel link)");
 });
+
+/* ------------------------------------------- alten Schluessel freigeben */
+
+test("link --force widerruft den alten Schlüssel, wenn ihn keine andere Maschine nutzt", async () => {
+  // Ausgangslage: frisch gekoppelt, Schluessel gueltig und angemeldet.
+  const first = await runAdmin(["link", "--yes", "--token", newToken("ausgang")]);
+  assert.equal(first.code, 0, first.output);
+  const old = storedKey();
+  const before = stub.calls.revoke.length;
+
+  const result = await runAdmin(["link", "--force", "--yes", "--token", newToken("ersetzen")]);
+  assert.equal(result.code, 0, result.output);
+  assert.notEqual(storedKey(), old);
+  // Erst nach dem gelungenen Wechsel, mit der Panel-ID dieser Maschine.
+  assert.deepEqual(stub.calls.revoke.slice(before), [old]);
+  assert.deepEqual(stub.calls.revokeBodies.slice(before), [{ panelId: "panel123456" }]);
+  assert.ok(stub.keys.revoked.has(old));
+  assert.ok(!stub.keys.revoked.has(storedKey()));
+  assert.match(result.output, /Der alte Schlüssel \(dzp_panel_\w+…\) ist auf dzpage\.com widerrufen\./);
+});
+
+test("Nutzt noch eine andere Maschine den alten Schlüssel, bleibt er aktiv", async () => {
+  const old = storedKey();
+  stub.keys.shared.add(old);
+  const result = await runAdmin(["link", "--force", "--yes", "--token", newToken("geteilt")]);
+  assert.equal(result.code, 0, result.output);
+  assert.notEqual(storedKey(), old);
+  assert.ok(!stub.keys.revoked.has(old));
+  assert.match(result.output, /Der alte Schlüssel \(.+\) bleibt auf dzpage\.com aktiv, weil ihn noch eine andere Maschine benutzt\./);
+});
+
+test("forget-key sagt ohne Netz, was zu tun ist, und hält das Entfernen nicht auf", async () => {
+  const result = await runAdmin(["forget-key"], { baseUrl: "http://127.0.0.1:9" });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /Den DZPage-Schlüssel dieser Maschine \(.+\) konnte das Panel auf dzpage\.com nicht widerrufen \(network\)/);
+  assert.ok(!stub.keys.revoked.has(storedKey()));
+});
+
+test("forget-key gibt den Schlüssel dieser Maschine vor dem endgültigen Entfernen frei", async () => {
+  const key = storedKey();
+  const before = stub.calls.revoke.length;
+  const result = await runAdmin(["forget-key"]);
+  assert.equal(result.code, 0, result.output);
+  assert.deepEqual(stub.calls.revoke.slice(before), [key]);
+  assert.deepEqual(stub.calls.revokeBodies.slice(before), [{ panelId: "panel123456" }]);
+  assert.ok(stub.keys.revoked.has(key));
+  assert.match(result.output, /Der DZPage-Schlüssel dieser Maschine \(.+\) ist auf dzpage\.com widerrufen\./);
+
+  const again = await runAdmin(["forget-key"]);
+  assert.equal(again.code, 0, again.output);
+  assert.match(again.output, /war auf dzpage\.com schon widerrufen/);
+});
+
+test("forget-key ohne Schlüssel tut nichts", async () => {
+  const config = loadConfig({ file: env.configFile });
+  const { saveConfig } = await import("../src/config.js");
+  config.dzpage.key = null;
+  saveConfig(config);
+  const before = stub.calls.revoke.length;
+  const result = await runAdmin(["forget-key"]);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /Kein DZPage-Schlüssel hinterlegt/);
+  assert.equal(stub.calls.revoke.length, before);
+});

@@ -61,6 +61,16 @@ fi
 # Der Arbeitsordner der Git-Installation steht in install.json.
 CHECKOUT=$(grep -oE '"checkout": *"[^"]*"' "$CONFIG_DIR/install.json" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' || true)
 
+if [ "$PURGE" -eq 1 ] && [ -x "$CLI" ]; then
+  # Gleich verschwindet die Konfiguration mit dem Schluessel. Vorher bei
+  # dzpage.com freigeben, sonst bliebe er dort aktiv, ohne dass ihn noch
+  # jemand benutzen kann. Nutzt ihn eine andere Maschine, laesst DZPage ihn
+  # stehen. Klappt es nicht, geht das Entfernen trotzdem weiter.
+  say "DZPage-Schluessel"
+  released=$(timeout 40 "$CLI" forget-key 2>&1 || true)
+  printf '%s\n' "${released:-keine Antwort}" | sed 's/^/  /'
+fi
+
 say "Panel anhalten"
 systemctl disable --now dzpage-panel.service >/dev/null 2>&1 || true
 systemctl disable --now dzpage-panel-helper.socket >/dev/null 2>&1 || true
@@ -166,6 +176,7 @@ else
   note "$DATA_DIR (Spieldateien, Speicherstaende, Datenbank)"
   note "$CONFIG_DIR (Konfiguration mit den Schluesseln, ohne die die Datenbank nutzlos ist)"
   note "Benutzer dzpage"
+  note "Der DZPage-Schluessel bleibt gueltig, damit eine neue Installation wieder verbunden ist; --purge widerruft ihn."
   note "Eine neue Installation setzt dort wieder auf. Alles loeschen: Panel neu installieren und mit --purge entfernen,"
   note "oder von Hand: sudo rm -rf $DATA_DIR $CONFIG_DIR && sudo userdel dzpage"
 fi

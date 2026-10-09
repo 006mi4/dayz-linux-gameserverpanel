@@ -33,6 +33,8 @@ import { clearKeyRejected, isRejection, markKeyRejected, readKeyRejection } from
  *   link [--token dzp_pair_...] [--force] [--yes]   mit dem DZPage-Konto koppeln
  *                                           (--yes: ohne Rueckfrage nach dem Konto)
  *   dzpage-status                           Verbindung zu DZPage in einer Zeile
+ *   forget-key                              Schluessel bei DZPage widerrufen, bevor
+ *                                           uninstall --purge die Konfiguration loescht
  *   steam-login <konto>                     SteamCMD-Anmeldung im Terminal
  *   reset-password [benutzer]               neues Passwort erzeugen
  *
@@ -355,6 +357,13 @@ async function link(config, args) {
   const token = tokenIndex >= 0 ? args[tokenIndex + 1] : null;
   if (tokenIndex >= 0 && !token) fail("Nach --token fehlt der Kopplungscode von dzpage.com.");
 
+  // Mit --force ersetzt ein neuer Schluessel einen noch gueltigen. Den alten
+  // gibt das Panel danach frei, sonst belegte er auf dzpage.com weiter einen
+  // der zehn Plaetze, ohne dass ihn noch jemand benutzt.
+  let previous = null;
+  if (config.dzpage.key && force) {
+    previous = { key: config.dzpage.key, panelId: (await readPanelState(config)).panelId };
+  }
   if (config.dzpage.key && !force) {
     const decision = await storedKeyDecision(config);
     if (decision === "linked") return;
@@ -386,6 +395,49 @@ async function link(config, args) {
   if (!isPanelKey(granted.key)) fail("DZPage hat eine unerwartete Antwort geschickt. Bitte später erneut versuchen.");
   if (!(await confirmAccount(granted.account, assumeYes))) await declineKey(config, granted.key);
   await adoptAndRegister(config, granted.key, granted.account);
+  if (previous && previous.key !== granted.key) await releaseOldKey(config, previous);
+}
+
+const OLD_KEY = { nom: "Der alte Schlüssel", acc: "Den alten Schlüssel" };
+const OWN_KEY = { nom: "Der DZPage-Schlüssel dieser Maschine", acc: "Den DZPage-Schlüssel dieser Maschine" };
+
+/**
+ * Einen Schluessel freigeben, den diese Maschine nicht mehr braucht. DZPage
+ * widerruft ihn nur, wenn keine andere Maschine ihn benutzt; ein von Hand
+ * angelegter kann auf mehreren stecken. Scheitert das, bleibt alles, wie es
+ * war, und der Mensch erfaehrt, wo er es selbst erledigt.
+ */
+async function releaseOldKey(config, { key, panelId }, words = OLD_KEY) {
+  const result = await revokeKey(config, key, { panelId });
+  const prefix = `${key.slice(0, 16)}…`;
+  if (result.ok && result.shared) {
+    say(`${words.nom} (${prefix}) bleibt auf dzpage.com aktiv, weil ihn noch eine andere Maschine benutzt.`);
+  } else if (result.ok && result.already) {
+    say(`${words.nom} (${prefix}) war auf dzpage.com schon widerrufen.`);
+  } else if (result.ok) {
+    say(`${words.nom} (${prefix}) ist auf dzpage.com widerrufen.`);
+  } else {
+    say(
+      `${words.acc} (${prefix}) konnte das Panel auf dzpage.com nicht widerrufen (${result.code}). ` +
+        "Nutzt ihn keine andere Maschine, widerrufe ihn dort unter RCon bei den Panel-Schlüsseln.",
+    );
+  }
+  return result;
+}
+
+/**
+ * Vor `uninstall --purge`: Die Konfiguration mit dem Schluessel verschwindet
+ * gleich. Ohne Widerruf bliebe er auf dzpage.com aktiv, und niemand kann ihn
+ * mehr benutzen. Gibt immer 0 zurueck: Das Entfernen geht weiter, auch wenn
+ * DZPage gerade nicht erreichbar ist.
+ */
+async function forgetKey(config) {
+  if (!config.dzpage.key) {
+    say("Kein DZPage-Schlüssel hinterlegt.");
+    return;
+  }
+  const { panelId } = await readPanelState(config);
+  await releaseOldKey(config, { key: config.dzpage.key, panelId }, OWN_KEY);
 }
 
 /* ---------------------------------------------------------------- Zustand */
@@ -484,5 +536,6 @@ const config = loadConfig({ generateSecrets: true });
 if (command === "reset-password") await resetPassword(config, rest[0]);
 else if (command === "link") await link(config, rest);
 else if (command === "dzpage-status") say(await dzpageStatus(config));
+else if (command === "forget-key") await forgetKey(config);
 else if (command === "steam-login") await steamLogin(config, rest[0]);
 else fail("Aufruf: dzpage-panel-admin.js link [--token ...] [--force] | dzpage-status | steam-login <konto> | reset-password [benutzer]");

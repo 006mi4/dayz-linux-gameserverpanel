@@ -154,13 +154,20 @@ export async function adoptKey({ config, db, key, name = null }) {
  * er dort aktiv und belegte einen der zehn Plaetze des Kontos. Ein schon
  * abgelehnter Schluessel gilt als erledigt. Kurze Fristen: Im Terminal wartet
  * ein Mensch, der gerade Nein gesagt hat (hoechstens etwa 18 Sekunden).
+ *
+ * `panelId`: das Panel dieser Maschine, wenn der Schluessel schon angemeldet
+ * war (neu koppeln, endgueltig entfernen). DZPage laesst ihn dann aktiv, wenn
+ * ihn noch eine andere Maschine benutzt: Ein von Hand angelegter Schluessel
+ * kann auf mehreren stecken. Ergebnis `shared: true` heisst genau das.
  */
-export async function revokeKey(config, key, { attempts = 3, sleep = defaultSleep } = {}) {
+export async function revokeKey(config, key, { panelId = null, attempts = 3, sleep = defaultSleep } = {}) {
   const client = new DzpageClient({ baseUrl: config.dzpage.baseUrl, key });
+  const body = panelId ? { panelId } : {};
   let result = { ok: false, code: "network" };
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    result = await client.request("POST", "/api/panel/v1/revoke", {}, { timeoutMs: 5_000 });
-    if (result.ok || isRejection(result.code)) return { ok: true };
+    result = await client.request("POST", "/api/panel/v1/revoke", body, { timeoutMs: 5_000 });
+    if (result.ok) return { ok: true, shared: result.shared === true };
+    if (isRejection(result.code)) return { ok: true, shared: false, already: true };
     if (!["network", "server", "rate_limited"].includes(result.code)) break;
     if (attempt < attempts) await sleep(1_000 * attempt);
   }

@@ -94,6 +94,9 @@ case "${1:-}" in
     exit "$rc"
     ;;
   steam-login) shift; admin steam-login "$@" ;;
+  # Fuer uninstall --purge: den Schluessel bei dzpage.com freigeben, bevor die
+  # Konfiguration verschwindet. Kein Befehl fuer Menschen, deshalb nicht in usage.
+  forget-key) admin forget-key ;;
   https) shift; exec "$APP_DIR/https.sh" "$@" ;;
   logs) exec journalctl -u dzpage-panel -f ;;
   uninstall) shift; exec "$APP_DIR/uninstall.sh" "$@" ;;
