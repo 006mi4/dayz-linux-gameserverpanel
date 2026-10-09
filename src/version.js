@@ -6,4 +6,4 @@
  * Veroeffentlicht wird eine Fassung als Git-Etikett `v<diese Zahl>`. Package
  * und Etikett muessen dazu passen — ein Test sorgt dafuer.
  */
-export const PANEL_VERSION = "0.5.1";
+export const PANEL_VERSION = "0.5.2";
