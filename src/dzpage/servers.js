@@ -1,5 +1,5 @@
 import { DzpageClient } from "./client.js";
-import { getSetting, KEYS, setSetting } from "../store/settings.js";
+import { deleteSetting, getNumber, getSetting, KEYS, setSetting } from "../store/settings.js";
 import { getServer, listServers, rconPassword, updateServer } from "../store/servers.js";
 import { recordEvent } from "../store/events.js";
 import { log } from "../log.js";
@@ -26,14 +26,19 @@ export async function registerServerWithDzpage(app, server) {
   const password = rconPassword(server, app.config.secrets.encryption);
   if (!password) return { ok: false, code: "rcon_password", message: "Das RCon-Passwort laesst sich nicht entschluesseln." };
 
-  const result = await client(app).registerServer({
-    panelId,
-    serverId: server.id,
-    name: server.name,
-    rconPort: server.rcon_port,
-    queryPort: server.query_port,
-    rconPassword: password,
-  });
+  const result = await client(app).registerServer(
+    {
+      panelId,
+      serverId: server.id,
+      name: server.name,
+      rconPort: server.rcon_port,
+      queryPort: server.query_port,
+      rconPassword: password,
+    },
+    // Schon angemeldet: Seine Adresse bei DZPage kann die richtige IPv4 sein,
+    // die eine kurze Stoerung nicht gegen IPv6 tauschen darf.
+    { fallback: server.dzpage_server_id ? "no_ipv4" : "any" },
+  );
 
   if (!result.ok) {
     log.warn(`Server ${server.id} konnte nicht bei DZPage angemeldet werden (${result.code})`);
@@ -81,6 +86,10 @@ const RETRY_CODES = new Set([
   "not_linked",
 ]);
 
+/** Scheitert eine Runde an einer Stoerung: so viel spaeter die naechste, und hoechstens so viele. */
+const RETRY_SPACING_MS = 10 * 60 * 1000;
+const MAX_ROUNDS = 12;
+
 /**
  * Einmal nach dem Update auf die Fassung mit IPv4-Anmeldung: alle schon
  * angemeldeten Server neu anmelden. Bis dahin ging die Anmeldung auf Maschinen
@@ -88,6 +97,20 @@ const RETRY_CODES = new Set([
  * Die Route ist dafuer gebaut: gleiche Panel- und Server-ID ergibt dieselbe
  * Zeile, die Adresse wird berichtigt, Zeitplaene bleiben.
  *
+ * Geplant wird beim Start, fuer genau die Kopplung, die dann besteht. Koppelt
+ * jemand die Maschine danach an ein anderes Konto, gehoeren die alten
+ * Anmeldungen samt RCon-Passwort nicht ungefragt dorthin.
+ */
+export async function planReregistration(app) {
+  if (await getSetting(app.db, KEYS.dzpageServersIpv4At)) return;
+  if (await getSetting(app.db, KEYS.dzpageServersIpv4Panel)) return;
+  const panelId = await getSetting(app.db, KEYS.dzpagePanelId);
+  const registered = (await listServers(app.db)).some((server) => server.dzpage_server_id);
+  if (panelId && registered) await setSetting(app.db, KEYS.dzpageServersIpv4Panel, panelId);
+  else await finishReregistration(app.db);
+}
+
+/**
  * Laeuft nach jedem gelungenen Herzschlag, bis alles durch ist. Server, die in
  * diesem Lauf schon angemeldet wurden, kommen nicht noch einmal dran.
  */
@@ -99,34 +122,66 @@ export function reregisterServersOnce(app) {
 }
 
 async function reregister(app) {
-  if (await getSetting(app.db, KEYS.dzpageServersIpv4At)) return { done: true, registered: 0 };
+  const db = app.db;
+  if (await getSetting(db, KEYS.dzpageServersIpv4At)) return { done: true, registered: 0 };
+  const plannedFor = await getSetting(db, KEYS.dzpageServersIpv4Panel);
+  if (!plannedFor || plannedFor !== (await getSetting(db, KEYS.dzpagePanelId))) {
+    // Nichts geplant (frisch eingerichtet) oder inzwischen anders gekoppelt.
+    await finishReregistration(db);
+    return { done: true, registered: 0 };
+  }
+  if (Date.now() < (app.dzpageReregisterNotBefore ?? 0)) return { done: false, registered: 0 };
 
-  const servers = (await listServers(app.db)).filter(
+  const servers = (await listServers(db)).filter(
     (server) => server.dzpage_server_id && !app.dzpageRegistered?.has(server.id),
   );
   let registered = 0;
-  let retry = false;
+  let retryCode = null;
   for (const listed of servers) {
     // Frisch lesen: Ein Server, der gerade geloescht wird, soll bei DZPage
     // nicht wieder auftauchen.
-    const server = await getServer(app.db, listed.id);
+    const server = await getServer(db, listed.id);
     if (!server?.dzpage_server_id) continue;
     const result = await registerServerWithDzpage(app, server).catch((err) => ({
       ok: false,
       code: "network",
       message: err.message,
     }));
-    if (result.ok) registered += 1;
-    else if (RETRY_CODES.has(result.code)) retry = true;
-  }
-  if (retry) {
-    log.warn("Neuanmeldung der Server bei DZPage noch nicht vollständig, nächster Versuch beim nächsten Herzschlag.");
-    return { done: false, registered };
+    if (result.ok) {
+      registered += 1;
+      // Doch waehrend der Anmeldung geloescht: Dann kann sie nach dem DELETE
+      // angekommen sein. Jetzt, nach ihrer Antwort, ist die Reihenfolge sicher.
+      if (!(await getServer(db, server.id))) await unregisterServerWithDzpage(app, server).catch(() => undefined);
+    } else if (RETRY_CODES.has(result.code)) {
+      retryCode = result.code;
+    }
   }
 
-  await setSetting(app.db, KEYS.dzpageServersIpv4At, Date.now());
+  if (retryCode) {
+    const rounds = ((await getNumber(db, KEYS.dzpageServersIpv4Tries)) ?? 0) + 1;
+    if (rounds < MAX_ROUNDS) {
+      await setSetting(db, KEYS.dzpageServersIpv4Tries, rounds);
+      app.dzpageReregisterNotBefore = Date.now() + RETRY_SPACING_MS;
+      log.warn(`Neuanmeldung der Server bei DZPage noch nicht vollständig (${retryCode}), nächster Versuch in 10 Minuten.`);
+      return { done: false, registered };
+    }
+    await recordEvent(db, {
+      kind: "dzpage.reregister.fail",
+      source: "dzpage",
+      message: `Neuanmeldung der Server bei DZPage nach ${rounds} Versuchen aufgegeben (zuletzt ${retryCode}). Für RCon von dzpage.com aus steht dort womöglich noch die IPv6-Adresse.`,
+    });
+    log.warn(`Neuanmeldung der Server bei DZPage aufgegeben (${retryCode}).`);
+  }
+
+  await finishReregistration(db);
   if (servers.length) log.info(`${registered} von ${servers.length} Servern bei DZPage neu angemeldet.`);
   return { done: true, registered };
+}
+
+async function finishReregistration(db) {
+  await setSetting(db, KEYS.dzpageServersIpv4At, Date.now());
+  await deleteSetting(db, KEYS.dzpageServersIpv4Panel);
+  await deleteSetting(db, KEYS.dzpageServersIpv4Tries);
 }
 
 /** Beim Loeschen im Panel: bei DZPage abschalten, nicht loeschen. */

@@ -8,6 +8,7 @@ import { createThrottle } from "./auth/throttle.js";
 import { createHeartbeat } from "./dzpage/heartbeat.js";
 import { createPoller } from "./dzpage/poller.js";
 import { createReporter } from "./dzpage/report.js";
+import { planReregistration } from "./dzpage/servers.js";
 import { createUpdateWatcher } from "./servers/updates.js";
 import { announceSelfUpdateResult, createPanelUpdateWatcher, markBootSuccessful } from "./panel/updates.js";
 import { purgeExpiredSessions } from "./store/sessions.js";
@@ -62,6 +63,9 @@ export async function startPanel({ port, bind } = {}) {
     // Kommen wir gerade aus einer Selbstaktualisierung? Dann steht das Ergebnis
     // in einer Datei — im Arbeitsspeicher hat es den Neustart nicht ueberlebt.
     await announceSelfUpdateResult(app).catch((err) => log.warn(`Ergebnis der Aktualisierung: ${err.message}`));
+    // Fuer die Kopplung, die jetzt besteht: einmal alle Server ueber IPv4 neu
+    // anmelden (dzpage/servers.js). Ausgefuehrt wird das nach dem Herzschlag.
+    await planReregistration(app).catch((err) => log.warn(`Neuanmeldung planen: ${err.message}`));
   }
 
   // Ohne Administrator oeffnet nur der Einrichtungscode den Assistenten. Er

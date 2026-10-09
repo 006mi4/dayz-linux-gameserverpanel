@@ -18,8 +18,13 @@ export const KEYS = {
   /** DZPage hat den Schluessel abgelehnt: "revoked" oder "invalid_key", und seit wann. */
   dzpageKeyRejected: "dzpage_key_rejected",
   dzpageKeyRejectedAt: "dzpage_key_rejected_at",
-  /** Seit wann alle angemeldeten Server einmal ueber IPv4 neu angemeldet sind (dzpage/servers.js). */
+  /**
+   * Einmalige Neuanmeldung der Server ueber IPv4 (dzpage/servers.js): seit wann
+   * erledigt, fuer welche Panel-ID geplant, wie viele Runden gescheitert.
+   */
   dzpageServersIpv4At: "dzpage_servers_ipv4_at",
+  dzpageServersIpv4Panel: "dzpage_servers_ipv4_panel",
+  dzpageServersIpv4Tries: "dzpage_servers_ipv4_tries",
   runtime: "runtime",
 
   /** Update-Pruefung: Zeitplan und letzter bekannter Stand bei Steam. */

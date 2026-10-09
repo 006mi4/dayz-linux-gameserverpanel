@@ -16,6 +16,12 @@ import { PANEL_VERSION } from "../version.js";
 
 export const PANEL_KEY_PREFIX = "dzp_panel_";
 const TIMEOUT_MS = 10_000;
+/**
+ * Fehler, die heissen: Von dieser Maschine geht gar nichts ueber IPv4 (keine
+ * Route, keine Adresse, kein A-Eintrag). EHOSTUNREACH und Zeitlimits gehoeren
+ * nicht dazu, die kommen auch bei kurzen Stoerungen.
+ */
+const NO_IPV4 = new Set(["ENETUNREACH", "EADDRNOTAVAIL", "EAFNOSUPPORT", "ENOTFOUND"]);
 
 export function platformLabel() {
   return `${osType()} ${release()} (${arch()})`.slice(0, 80);
@@ -124,7 +130,9 @@ export class DzpageClient {
     } catch (err) {
       // Zeitueberschreitung und Namensauflösung landen beide hier.
       const message = err.name === "TimeoutError" ? "Zeitüberschreitung" : err.message;
-      if (ipv4) return { ok: false, code: "network", message, connected: err.connected === true };
+      if (ipv4) {
+        return { ok: false, code: "network", message, connected: err.connected === true, errorCode: err.code ?? null };
+      }
       return { ok: false, code: "network", message };
     }
 
@@ -169,16 +177,24 @@ export class DzpageClient {
    * RCon-Adresse, und BattlEye-RCon spricht nur IPv4: Deshalb geht genau diese
    * Anfrage ueber IPv4, auch wenn die Maschine sonst IPv6 bevorzugt.
    *
-   * Kommt ueber IPv4 gar keine Verbindung zustande (Maschine ohne IPv4), wie
-   * jeder andere Aufruf. DZPage legt den Server dann mit `warning:
-   * "ipv6_source"` an, und RCon bleibt aus. Stand die Verbindung schon, gibt es
-   * keinen zweiten Versuch: Die Anmeldung kann angekommen sein, und eine zweite
-   * ueber IPv6 wuerde die richtige Adresse wieder ueberschreiben.
+   * Kommt ueber IPv4 keine Verbindung zustande, wie jeder andere Aufruf.
+   * DZPage legt den Server dann mit `warning: "ipv6_source"` an, und RCon
+   * bleibt aus. Wann das gilt, sagt `fallback`:
+   * - "any": jeder Fehler vor dem Verbinden. Fuer einen neuen Server, bei dem
+   *   es nichts zu verlieren gibt.
+   * - "no_ipv4": nur Fehler, die heissen, dass es hier kein IPv4 gibt. Fuer
+   *   einen schon angemeldeten Server: Eine kurze Stoerung (Zeitlimit, DNS)
+   *   soll seine richtige IPv4-Adresse nicht durch IPv6 ersetzen.
+   * Stand die Verbindung schon, gibt es nie einen zweiten Versuch: Die
+   * Anmeldung kann angekommen sein, und eine zweite ueber IPv6 wuerde die
+   * richtige Adresse wieder ueberschreiben.
    */
-  async registerServer(body) {
+  async registerServer(body, { fallback = "any" } = {}) {
     const viaIpv4 = await this.request("POST", "/api/panel/v1/servers", body, { ipv4: true });
-    if (viaIpv4.ok || viaIpv4.code !== "network" || viaIpv4.connected) return { ...viaIpv4, via: "ipv4" };
-    const fallback = await this.post("/api/panel/v1/servers", body);
-    return { ...fallback, via: "fallback", ipv4Error: viaIpv4.message };
+    const unreached = viaIpv4.code === "network" && !viaIpv4.connected;
+    const fallBack = unreached && (fallback === "any" || NO_IPV4.has(viaIpv4.errorCode));
+    if (!fallBack) return { ...viaIpv4, via: "ipv4" };
+    const result = await this.post("/api/panel/v1/servers", body);
+    return { ...result, via: "fallback", ipv4Error: viaIpv4.message };
   }
 }

@@ -155,6 +155,7 @@ export async function startDzpageStub({
    * failServers: die naechsten n Server-Anmeldungen scheitern mit 503.
    * dropServers: die naechsten n Server-Anmeldungen kommen an, die Verbindung
    *   bricht aber ab, bevor die Antwort da ist.
+   * serversDelayMs: so lange braucht die Antwort auf eine Server-Anmeldung.
    */
   const state = {
     revoked: false,
@@ -162,6 +163,7 @@ export async function startDzpageStub({
     failRegister: 0,
     failServers: 0,
     dropServers: 0,
+    serversDelayMs: 0,
     noReport: false,
     noRevoke: false,
     forbiddenPage: null,
@@ -311,10 +313,12 @@ export async function startDzpageStub({
         // Wie dzpage.com ab 1.161.0: Die Quelladresse ist die RCon-Adresse.
         // IPv6 wird angelegt, RCon bleibt aber aus. Ueber IPv4 steht hier eine
         // feste oeffentliche Adresse, weil der Test von 127.0.0.1 kommt.
-        if (isIP(source) === 6 && !source.startsWith("::ffff:")) {
-          return send(200, { ok: true, serverId: "rcon123456", host: source, rcon: false, warning: "ipv6_source" });
-        }
-        return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7", rcon: true });
+        const answer =
+          isIP(source) === 6 && !source.startsWith("::ffff:")
+            ? { ok: true, serverId: "rcon123456", host: source, rcon: false, warning: "ipv6_source" }
+            : { ok: true, serverId: "rcon123456", host: "203.0.113.7", rcon: true };
+        setTimeout(() => send(200, answer), state.serversDelayMs);
+        return;
       }
       if (path === "/api/panel/v1/report") {
         if (state.noReport) {

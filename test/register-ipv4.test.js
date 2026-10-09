@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { connect, isIP } from "node:net";
 import { createServer, request } from "node:http";
-import { isIP } from "node:net";
 import dns from "node:dns/promises";
 import { Client, launchPanel, prepareEnv, startDzpageStub, unlockSetup } from "../test-support/helper.js";
 
@@ -17,11 +17,17 @@ const env = prepareEnv("ipv4");
 process.on("exit", () => env.cleanup());
 
 const { DzpageClient, fetchIpv4 } = await import("../src/dzpage/client.js");
-const { registerServerWithDzpage, reregisterServersOnce } = await import("../src/dzpage/servers.js");
-const { checkServerInput, createServer: createPanelServer, getServer, updateServer } = await import(
-  "../src/store/servers.js"
+const { planReregistration, registerServerWithDzpage, reregisterServersOnce } = await import(
+  "../src/dzpage/servers.js"
 );
-const { deleteSetting, getSetting, KEYS } = await import("../src/store/settings.js");
+const {
+  checkServerInput,
+  createServer: createPanelServer,
+  deleteServer,
+  getServer,
+  updateServer,
+} = await import("../src/store/servers.js");
+const { deleteSetting, getSetting, KEYS, setSetting } = await import("../src/store/settings.js");
 const { listEvents } = await import("../src/store/events.js");
 
 async function listen(server, host) {
@@ -44,9 +50,26 @@ async function hasIpv6Loopback() {
     probe.close();
   }
 }
-const IPV6 = await hasIpv6Loopback();
 
-const isIpv4Source = (address) => isIP(address) === 4 || /^::ffff:\d+\.\d+\.\d+\.\d+$/.test(address);
+/** Nimmt ein Lauscher auf "::" auch IPv4 an (bindv6only=0)? Nur dann sieht er beide Familien. */
+async function hasDualStackListener() {
+  const probe = createServer();
+  try {
+    const port = await listen(probe, "::");
+    await new Promise((resolve, reject) => {
+      const socket = connect(port, "127.0.0.1", () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.once("error", reject);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    probe.close();
+  }
+}
 
 /** Ein Name, den die echte Aufloesung auf ::1 UND 127.0.0.1 abbildet (z. B. per /etc/hosts). */
 async function dualStackName() {
@@ -68,10 +91,22 @@ async function ipv6Name() {
   return found.length && found.every((entry) => entry.address === "::1") ? "ip6-localhost" : null;
 }
 
+// Alles Nachschlagen vor dem ersten test(): Ein await zwischen den Tests laesst
+// node --test die Warteschlange leerlaufen und test.after zu frueh laufen.
+const IPV6 = await hasIpv6Loopback();
+const DUAL = IPV6 && (await hasDualStackListener());
+const dual = DUAL ? await dualStackName() : null;
+const v6name = IPV6 ? await ipv6Name() : null;
+// Loest der Name auch fuer IPv4 auf (glibc: 127.0.0.1), scheitert IPv4 dort mit
+// ECONNREFUSED: eine Stoerung, keine Maschine ohne IPv4.
+const v6nameRefusesIpv4 = v6name ? await dns.lookup(v6name, { family: 4 }).then(() => true, () => false) : false;
+
+const isIpv4Source = (address) => isIP(address) === 4 || /^::ffff:\d+\.\d+\.\d+\.\d+$/.test(address);
+
 // Der Standhalter lauscht auf beiden Familien, damit er sieht, woher eine
 // Anfrage kommt. Das Panel spricht ihn ueber 127.0.0.1 an, ausser ein Test
 // stellt die Adresse um.
-const stub = await startDzpageStub(IPV6 ? { host: "::", urlHost: "127.0.0.1" } : {});
+const stub = await startDzpageStub(DUAL ? { host: "::", urlHost: "127.0.0.1" } : {});
 process.env.DZPAGE_BASE_URL = stub.url;
 const panel = await launchPanel();
 const client = new Client(panel.url);
@@ -110,6 +145,22 @@ async function newServer(name) {
   return createPanelServer(panel.app.db, checked.value, panel.app.config.secrets.encryption);
 }
 
+/** Ein Server, wie ihn eine aeltere Fassung angemeldet hat (womoeglich ueber IPv6). */
+async function oldRegistration(name) {
+  const server = await newServer(name);
+  await updateServer(panel.app.db, server.id, { dzpage_server_id: "rcon-alt" });
+  return server;
+}
+
+/** Wie nach dem Update: Neuanmeldung offen und beim Start fuer die jetzige Kopplung geplant. */
+async function freshUpdate() {
+  await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4At);
+  await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4Panel);
+  await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4Tries);
+  panel.app.dzpageReregisterNotBefore = 0;
+  await planReregistration(panel.app);
+}
+
 /** Antwort eines Echo-Servers: woher die Anfrage kam und was ankam. */
 function echoServer() {
   return createServer((req, res) => {
@@ -132,7 +183,7 @@ function echoServer() {
 
 /* ----------------------------------------------------------- fetchIpv4 */
 
-test("fetchIpv4 verbindet über IPv4, auch wo die Auflösung zuerst IPv6 liefert", { skip: !IPV6 && "keine IPv6-Schleife" }, async () => {
+test("fetchIpv4 verbindet über IPv4, auch wo die Auflösung zuerst IPv6 liefert", { skip: !DUAL && "kein Dual-Stack-Lauscher" }, async () => {
   const echo = echoServer();
   const port = await listen(echo, "::");
   try {
@@ -215,16 +266,21 @@ test("fetchIpv4 sagt bei Fehlern, ob die Verbindung schon stand", async () => {
 
 /* --------------------------------------------- DzpageClient.registerServer */
 
+const KEY = "dzp_panel_testkey0123456789abcdef";
 const answer = (status, payload) => ({ ok: status >= 200 && status < 300, status, json: async () => payload });
 const unreachable = () => {
   throw new Error("dieser Weg darf nicht benutzt werden");
+};
+/** IPv4-Weg, der vor dem Verbinden mit diesem Fehler scheitert. */
+const failingBeforeConnect = (code, name = "Error") => async () => {
+  throw Object.assign(new Error(`connect ${code}`), { code, name, connected: false });
 };
 
 test("Nur die Server-Anmeldung geht über IPv4, mit denselben Kopfzeilen wie sonst", async () => {
   const seen = [];
   const dzpage = new DzpageClient({
     baseUrl: "https://dzpage.example/",
-    key: "dzp_panel_testkey0123456789abcdef",
+    key: KEY,
     fetchImpl: async (url, init) => {
       seen.push({ via: "fetch", url, init });
       return answer(200, { ok: true, heartbeatSeconds: 60 });
@@ -253,22 +309,23 @@ test("Nur die Server-Anmeldung geht über IPv4, mit denselben Kopfzeilen wie son
   assert.deepEqual(JSON.parse(ipv4.body), { panelId: "p1", serverId: "abcdefabcdef" });
   assert.ok(ipv4.signal instanceof AbortSignal);
   assert.deepEqual(Object.keys(ipv4.headers).sort(), Object.keys(plain.headers).sort());
-  assert.equal(ipv4.headers.authorization, "Bearer dzp_panel_testkey0123456789abcdef");
+  assert.equal(ipv4.headers.authorization, `Bearer ${KEY}`);
 });
 
 test("Rückfall auf den normalen Weg nur, wenn IPv4 gar nicht verbindet", async () => {
-  const key = "dzp_panel_testkey0123456789abcdef";
   let fallbacks = 0;
   const viaIpv6 = async () => {
     fallbacks += 1;
     return answer(200, { ok: true, serverId: "rcon1", host: "2001:db8::7", rcon: false, warning: "ipv6_source" });
   };
-  const failing = (connected) => async () => {
-    throw Object.assign(new Error("connect ENETUNREACH 104.21.0.1:443"), { code: "ENETUNREACH", connected });
-  };
 
   // Keine IPv4-Verbindung: wie bisher, mit der Warnung von DZPage.
-  const noIpv4 = new DzpageClient({ baseUrl: "https://dzpage.example", key, fetchImpl: viaIpv6, ipv4FetchImpl: failing(false) });
+  const noIpv4 = new DzpageClient({
+    baseUrl: "https://dzpage.example",
+    key: KEY,
+    fetchImpl: viaIpv6,
+    ipv4FetchImpl: failingBeforeConnect("ENETUNREACH"),
+  });
   const fell = await noIpv4.registerServer({ panelId: "p1" });
   assert.equal(fell.ok, true);
   assert.equal(fell.via, "fallback");
@@ -277,7 +334,14 @@ test("Rückfall auf den normalen Weg nur, wenn IPv4 gar nicht verbindet", async 
   assert.equal(fallbacks, 1);
 
   // Verbindung stand schon: kein zweiter Versuch, der die Adresse ueberschreiben koennte.
-  const cut = new DzpageClient({ baseUrl: "https://dzpage.example", key, fetchImpl: unreachable, ipv4FetchImpl: failing(true) });
+  const cut = new DzpageClient({
+    baseUrl: "https://dzpage.example",
+    key: KEY,
+    fetchImpl: unreachable,
+    ipv4FetchImpl: async () => {
+      throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET", connected: true });
+    },
+  });
   const cutResult = await cut.registerServer({ panelId: "p1" });
   assert.equal(cutResult.ok, false);
   assert.equal(cutResult.code, "network");
@@ -291,13 +355,45 @@ test("Rückfall auf den normalen Weg nur, wenn IPv4 gar nicht verbindet", async 
   ]) {
     const refused = new DzpageClient({
       baseUrl: "https://dzpage.example",
-      key,
+      key: KEY,
       fetchImpl: unreachable,
       ipv4FetchImpl: async () => answer(status, payload),
     });
     const result = await refused.registerServer({ panelId: "p1" });
     assert.equal(result.ok, false);
     assert.equal(result.code, code);
+  }
+});
+
+test("Schon angemeldet: Rückfall nur ohne IPv4, nicht bei einer kurzen Störung", async () => {
+  const ipv6Answer = async () =>
+    answer(200, { ok: true, serverId: "rcon1", host: "2001:db8::7", rcon: false, warning: "ipv6_source" });
+  const cases = [
+    // [Fehler vor dem Verbinden, Name, Rueckfall bei "any", bei "no_ipv4"]
+    ["ENETUNREACH", "Error", true, true],
+    ["EADDRNOTAVAIL", "Error", true, true],
+    ["ENOTFOUND", "Error", true, true],
+    ["EAI_AGAIN", "Error", true, false],
+    ["ECONNREFUSED", "Error", true, false],
+    ["EHOSTUNREACH", "Error", true, false],
+    ["ABORT_ERR", "TimeoutError", true, false],
+  ];
+  for (const [code, name, any, noIpv4] of cases) {
+    for (const [fallback, expected] of [
+      ["any", any],
+      ["no_ipv4", noIpv4],
+    ]) {
+      const dzpage = new DzpageClient({
+        baseUrl: "https://dzpage.example",
+        key: KEY,
+        fetchImpl: ipv6Answer,
+        ipv4FetchImpl: failingBeforeConnect(code, name),
+      });
+      const result = await dzpage.registerServer({ panelId: "p1" }, { fallback });
+      assert.equal(result.via, expected ? "fallback" : "ipv4", `${code} bei ${fallback}`);
+      assert.equal(result.ok, expected, `${code} bei ${fallback}`);
+      if (!expected) assert.equal(result.code, "network");
+    }
   }
 });
 
@@ -334,7 +430,6 @@ test("Die Anmeldung kommt bei DZPage über IPv4 an, RCon ist an", async () => {
   assert.match(event.message, /Vierer bei DZPage angemeldet \(203\.0\.113\.7\)/);
 });
 
-const dual = IPV6 ? await dualStackName() : null;
 test(
   "Gleicher Name mit IPv4 und IPv6: Herzschlag nimmt IPv6, die Anmeldung IPv4",
   { skip: !dual && "kein Name mit A- und AAAA-Eintrag (DZPAGE_TEST_DUAL_HOST)" },
@@ -357,7 +452,6 @@ test(
   },
 );
 
-const v6name = IPV6 ? await ipv6Name() : null;
 test(
   "Ohne IPv4: Anmeldung über IPv6, Warnung im Ereignisprotokoll und auf der Startseite",
   { skip: !v6name && "kein Name fuer ::1 (ip6-localhost)" },
@@ -388,6 +482,18 @@ test(
         client.lastBody,
         /<span class="dot warn"><\/span><span class="txt">Nur Sechs bei DZPage angemeldet, aber nur mit der IPv6-Adresse ::1/,
       );
+
+      // Ein Server, der schon angemeldet ist, faellt bei einer bloss
+      // abgewiesenen IPv4-Verbindung nicht auf IPv6 zurueck: Seine Adresse bei
+      // DZPage koennte die richtige sein.
+      if (v6nameRefusesIpv4) {
+        const registered = await getServer(panel.app.db, (await oldRegistration("Schon da")).id);
+        const kept = await registerServerWithDzpage(panel.app, registered);
+        assert.equal(kept.ok, false);
+        assert.equal(kept.code, "network");
+        assert.deepEqual(only6.calls.serverSources, ["::1"]);
+        await deleteServer(panel.app.db, registered.id);
+      }
     } finally {
       panel.app.config.dzpage.baseUrl = saved;
       await only6.stop();
@@ -417,18 +523,24 @@ test("Bricht die Verbindung nach dem Absenden ab, gibt es keinen zweiten Versuch
 /* ------------------------------------------- Einmal nach dem Update */
 
 test("Nach dem Update: angemeldete Server einmal neu anmelden, Störungen später wiederholen", async () => {
-  // Wie von 0.5.3 angemeldet (womoeglich ueber IPv6), und einer nie angemeldet.
-  const old = await newServer("Altanmeldung");
-  await updateServer(panel.app.db, old.id, { dzpage_server_id: "rcon-alt" });
+  const old = await oldRegistration("Altanmeldung");
   const never = await newServer("Nie angemeldet");
-  await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4At);
+  await freshUpdate();
+  assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4Panel), "panel123456");
 
   const before = stub.calls.servers.length;
   stub.state.failServers = 1;
   const first = await reregisterServersOnce(panel.app);
   assert.equal(first.done, false);
   assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4At), null);
+  assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4Tries), "1");
 
+  // Nicht bei jedem Herzschlag: Die naechste Runde wartet.
+  const waiting = await reregisterServersOnce(panel.app);
+  assert.deepEqual(waiting, { done: false, registered: 0 });
+  assert.equal(stub.calls.servers.length, before);
+
+  panel.app.dzpageReregisterNotBefore = 0;
   const second = await reregisterServersOnce(panel.app);
   assert.equal(second.done, true);
   assert.equal(second.registered, 1);
@@ -443,17 +555,80 @@ test("Nach dem Update: angemeldete Server einmal neu anmelden, Störungen späte
   assert.equal((await getServer(panel.app.db, old.id)).dzpage_server_id, "rcon123456");
   assert.equal((await getServer(panel.app.db, never.id)).dzpage_server_id, null);
   assert.ok(Number(await getSetting(panel.app.db, KEYS.dzpageServersIpv4At)) > 0);
+  assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4Panel), null);
+  assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4Tries), null);
 
-  // Danach nie wieder.
+  // Danach nie wieder, auch nicht nach einem Neustart.
+  await planReregistration(panel.app);
   const third = await reregisterServersOnce(panel.app);
   assert.deepEqual(third, { done: true, registered: 0 });
   assert.equal(stub.calls.servers.length, before + 1);
 });
 
+test("Inzwischen an ein anderes Konto gekoppelt: die alten Server bleiben draußen", async () => {
+  const old = await oldRegistration("Fremdkopplung");
+  await freshUpdate();
+  // Geplant fuer die Kopplung von damals, jetzt besteht eine andere.
+  await setSetting(panel.app.db, KEYS.dzpageServersIpv4Panel, "panel-damals");
+  const before = stub.calls.servers.length;
+  const result = await reregisterServersOnce(panel.app);
+  assert.deepEqual(result, { done: true, registered: 0 });
+  assert.equal(stub.calls.servers.length, before);
+  assert.equal((await getServer(panel.app.db, old.id)).dzpage_server_id, "rcon-alt");
+
+  // Beim Start ohne Kopplung gibt es nichts zu planen.
+  const panelId = await getSetting(panel.app.db, KEYS.dzpagePanelId);
+  await deleteSetting(panel.app.db, KEYS.dzpagePanelId);
+  try {
+    await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4At);
+    await planReregistration(panel.app);
+    assert.equal(await getSetting(panel.app.db, KEYS.dzpageServersIpv4Panel), null);
+    assert.ok(await getSetting(panel.app.db, KEYS.dzpageServersIpv4At));
+  } finally {
+    await setSetting(panel.app.db, KEYS.dzpagePanelId, panelId);
+  }
+  await deleteServer(panel.app.db, old.id);
+});
+
+test("Während der Neuanmeldung gelöscht: danach bei DZPage wieder abgeschaltet", async () => {
+  const old = await oldRegistration("Gleich weg");
+  await freshUpdate();
+  stub.state.serversDelayMs = 300;
+  try {
+    const running = reregisterServersOnce(panel.app);
+    await waitFor(() => stub.calls.servers.some((call) => call.serverId === old.id));
+    // Das Loeschen im Panel ist schneller als die Antwort von DZPage.
+    await deleteServer(panel.app.db, old.id);
+    const result = await running;
+    assert.equal(result.done, true);
+  } finally {
+    stub.state.serversDelayMs = 0;
+  }
+  assert.deepEqual(stub.calls.unregister.at(-1), { panelId: "panel123456", serverId: old.id });
+});
+
+test("Nach zwölf gestörten Runden aufgeben, mit Ereignis", async () => {
+  const old = await oldRegistration("Dauerstoerung");
+  await freshUpdate();
+  await setSetting(panel.app.db, KEYS.dzpageServersIpv4Tries, 11);
+  stub.state.failServers = 100;
+  try {
+    const result = await reregisterServersOnce(panel.app);
+    assert.deepEqual(result, { done: true, registered: 0 });
+  } finally {
+    stub.state.failServers = 0;
+  }
+  assert.ok(await getSetting(panel.app.db, KEYS.dzpageServersIpv4At));
+  const [event] = await listEvents(panel.app.db, 1);
+  assert.equal(event.kind, "dzpage.reregister.fail");
+  assert.match(event.message, /nach 12 Versuchen aufgegeben \(zuletzt server\)/);
+  assert.doesNotMatch(event.message, /[–—]/);
+  await deleteServer(panel.app.db, old.id);
+});
+
 test("Der Herzschlag stößt die einmalige Neuanmeldung an", async () => {
-  const old = await newServer("Herzschlag alt");
-  await updateServer(panel.app.db, old.id, { dzpage_server_id: "rcon-alt" });
-  await deleteSetting(panel.app.db, KEYS.dzpageServersIpv4At);
+  const old = await oldRegistration("Herzschlag alt");
+  await freshUpdate();
   const before = stub.calls.servers.length;
 
   panel.app.heartbeat.restart({ immediate: true });
