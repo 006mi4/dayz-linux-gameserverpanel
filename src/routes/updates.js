@@ -108,7 +108,7 @@ function panelCard(t, state, csrf) {
     [t("panel.installed"), `<span class="mono">${escapeHtml(state.current)}</span>`],
     [
       t("panel.latest"),
-      `<span class="mono">${escapeHtml(state.latest || "—")}</span> ${state.error ? "" : pill(kind, stateText)}`,
+      `<span class="mono">${escapeHtml(state.latest || "-")}</span> ${state.error ? "" : pill(kind, stateText)}`,
     ],
     [
       t("panel.checked"),
@@ -207,7 +207,7 @@ export async function page(rc, { message = null, messageKind = "ok" } = {}) {
   const tiles = [
     tile({
       label: t("updates.tile.public"),
-      value: state.available || "—",
+      value: state.available || "-",
       sub: state.publishedAt ? t("updates.published", { when: relativeTime(t, state.publishedAt) }) : "",
       iconName: "download",
     }),
@@ -264,7 +264,7 @@ export async function page(rc, { message = null, messageKind = "ok" } = {}) {
     .map(
       (server) => `<tr>
         <td><a href="/server?id=${escapeHtml(server.id)}">${escapeHtml(server.name)}</a></td>
-        <td class="num">${escapeHtml(server.installed || "—")}</td>
+        <td class="num">${escapeHtml(server.installed || "-")}</td>
         <td>${statePill(t, server.state)}</td>
         <td>${modeSelect(t, server)}</td>
       </tr>`,

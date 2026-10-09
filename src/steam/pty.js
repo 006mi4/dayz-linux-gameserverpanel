@@ -68,7 +68,7 @@ export function buildCommandLine(command, args = []) {
 export function spawnPty({ command, args = [], env = {}, cwd, onData }) {
   if (!isPtyAvailable()) {
     throw new Error(
-      "script(1) aus util-linux fehlt — ohne Terminal kann SteamCMD nicht nach dem Passwort fragen. " +
+      "script(1) aus util-linux fehlt. Ohne Terminal kann SteamCMD nicht nach dem Passwort fragen. " +
         "Auf Debian/Ubuntu: apt-get install util-linux",
     );
   }

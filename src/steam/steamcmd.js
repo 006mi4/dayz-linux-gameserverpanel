@@ -123,7 +123,7 @@ function runQuiet(command, args, { cwd } = {}) {
  */
 export async function installSteamCmd(job) {
   const tar = findBinary(["/bin/tar", "/usr/bin/tar"]);
-  if (!tar) throw new Error("tar fehlt — ohne Entpacker kann SteamCMD nicht installiert werden.");
+  if (!tar) throw new Error("tar fehlt. Ohne Entpacker kann SteamCMD nicht installiert werden.");
 
   mkdirSync(STEAMCMD_DIR, { recursive: true, mode: 0o750 });
   const archive = join(STEAMCMD_DIR, "steamcmd_linux.tar.gz");
@@ -296,7 +296,7 @@ export async function verifySession({ steamcmdPath, account }) {
     );
     if (step.name === "ok") return { ok: true };
     if (step.name === "password" || step.name === "guard" || step.name === "cached") {
-      return { ok: false, message: "Das Sitzungstoken traegt nicht mehr — bitte neu anmelden." };
+      return { ok: false, message: "Das Sitzungstoken traegt nicht mehr. Bitte neu anmelden." };
     }
     return { ok: false, message: failureReason(pty.output) };
   } finally {

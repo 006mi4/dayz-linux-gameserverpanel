@@ -27,6 +27,8 @@ class Job {
     this.lines = [];
     this.awaiting = null;
     this.error = null;
+    /** Fester Code des Fehlers (err.code), falls der Vorgang einen mitgibt. */
+    this.errorCode = null;
     this.result = null;
     this.startedAt = Date.now();
     this.finishedAt = null;
@@ -110,6 +112,7 @@ export function createJobs() {
         .catch((err) => {
           job.status = "failed";
           job.error = job.clean(err.message || String(err));
+          job.errorCode = typeof err?.code === "string" ? err.code : null;
           log.warn(`Vorgang ${kind} fehlgeschlagen: ${job.error}`);
         })
         .finally(() => {

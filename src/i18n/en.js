@@ -73,7 +73,7 @@ export const en = {
 
   "setup.steam.heading": "Sign in to Steam",
   "setup.steam.lede":
-    "A DayZ Linux server needs a Steam account that owns DayZ — anonymous downloads are refused. You enter the password once: SteamCMD keeps its own session token afterwards, and the panel never stores the password.",
+    "A DayZ Linux server needs a Steam account that owns DayZ; anonymous downloads are refused. You enter the password once: SteamCMD keeps its own session token afterwards, and the panel never stores the password.",
   "setup.steam.account": "Steam account name",
   "setup.steam.password": "Steam password",
   "setup.steam.passwordHint": "Passed straight to SteamCMD and discarded afterwards.",
@@ -95,20 +95,20 @@ export const en = {
   "setup.steam.verify": "Check the saved sign-in",
   "setup.steam.verifyHint":
     "Runs SteamCMD once without a password. If that works, downloads and updates will work unattended.",
-  "setup.steam.verifyOk": "The saved session still works — {account} signs in without a password.",
+  "setup.steam.verifyOk": "The saved session still works: {account} signs in without a password.",
   "setup.steam.verifyFailed": "The saved session does not work: {message}",
   "setup.steam.busy": "A SteamCMD run is already in progress.",
 
   "setup.dzpage.heading": "Connect to your DZPage account",
   "setup.dzpage.lede":
-    "Create a panel key at {url} and paste it here. The key may register servers and report status — nothing else. The panel only ever calls out to DZPage, so the panel itself needs no open port. Your game servers do: players and DZPage's RCon reach them from outside.",
+    "Create a panel key at {url} and paste it here. The key may register servers and report status, nothing else. The panel only ever calls out to DZPage, so the panel itself needs no open port. Your game servers do: players and DZPage's RCon reach them from outside.",
   "setup.dzpage.key": "Panel key",
   "setup.dzpage.keyHint": "Starts with dzp_panel_ and is shown only once on DZPage.",
   "setup.dzpage.name": "Name of this panel",
   "setup.dzpage.nameHint": "Shown in your DZPage account, for example “Home server”.",
   "setup.dzpage.connect": "Connect",
   "setup.dzpage.connected": "Connected to the account {account}.",
-  "setup.dzpage.err.missing_key": "That does not look like a panel key — it starts with dzp_panel_.",
+  "setup.dzpage.err.missing_key": "That does not look like a panel key. It starts with dzp_panel_.",
   "setup.dzpage.err.invalid_key": "DZPage does not know this key.",
   "setup.dzpage.err.revoked": "This key was revoked. Create a new one on DZPage.",
   "setup.dzpage.err.bad_request": "DZPage rejected the request.",
@@ -192,7 +192,7 @@ export const en = {
   "servers.queryPort": "Query port",
   "servers.rconPort": "RCon port",
   "servers.rconPassword": "RCon password",
-  "servers.rconPasswordHint": "No spaces — BattlEye stores it unquoted. Pre-filled with a random one.",
+  "servers.rconPasswordHint": "No spaces: BattlEye stores it unquoted. Pre-filled with a random one.",
   "servers.maxPlayers": "Max players",
   "servers.mission": "Mission",
   "servers.limits": "Resource limits",
@@ -275,12 +275,12 @@ export const en = {
   "updates.mode.notify": "Only report it",
   "updates.mode.auto": "Update automatically",
   "updates.mode.autoWarning":
-    "“Update automatically” stops the server, swaps the game files and starts it again — with no warning in game. For a server with players on it, “Only report it” is the better choice.",
+    "“Update automatically” stops the server, swaps the game files and starts it again, with no warning in game. For a server with players on it, “Only report it” is the better choice.",
   "updates.schedule.heading": "Automatic check",
   "updates.schedule.sub": "applies to every server on this panel",
   "updates.schedule.enable": "Ask Steam regularly",
   "updates.schedule.hint":
-    "The query signs in to Steam anonymously and downloads nothing. It works without a Steam login — only downloading needs your account.",
+    "The query signs in to Steam anonymously and downloads nothing. It works without a Steam login; only downloading needs your account.",
   "updates.schedule.interval": "Interval",
   "updates.servers.heading": "Servers",
   "updates.servers.sub": "what should happen when a new build appears",
@@ -298,31 +298,31 @@ export const en = {
   "updates.err.check": "The last check failed: {message}",
 
   "cfg.title": "Configuration",
-  "cfg.lede": "serverDZ.cfg for {name}. The panel writes this file — edit it here, not on disk.",
+  "cfg.lede": "serverDZ.cfg for {name}. The panel writes this file, so edit it here, not on disk.",
   "cfg.basics.heading": "Basics",
   "cfg.basics.sub": "the panel needs these elsewhere too, so they have their own fields",
   "cfg.portsFixed":
-    "Ports cannot be changed here. They are tied to the DZPage registration, to BattlEye and to the other servers on this panel — a port is not a setting, it is the identity of the server.",
+    "Ports cannot be changed here. They are tied to the DZPage registration, to BattlEye and to the other servers on this panel. A port is not a setting, it is the identity of the server.",
   "cfg.entries.heading": "serverDZ.cfg",
-  "cfg.entries.sub": "every other value — change it, remove it, or add one the panel does not know",
+  "cfg.entries.sub": "every other value: change it, remove it, or add one the panel does not know",
   "cfg.key": "Key",
   "cfg.value": "Value",
   "cfg.remove": "Remove",
   "cfg.newKey": "new key",
   "cfg.newValue": "value",
   "cfg.entriesHint":
-    "Numbers are written as they are, everything else is quoted. A value that already starts with { or \" is taken verbatim — that is how motd[] = {\"line 1\",\"line 2\"} works. The preview below shows exactly what will be written.",
+    "Numbers are written as they are, everything else is quoted. A value that already starts with { or \" is taken verbatim; that is how motd[] = {\"line 1\",\"line 2\"} works. The preview below shows exactly what will be written.",
   "cfg.defaults": "Back to defaults",
   "cfg.preview.heading": "Preview",
   "cfg.preview.sub": "what the panel writes to serverDZ.cfg",
   "cfg.saved": "Saved.",
   "cfg.savedRestart": "Saved. The server picks the file up on its next restart.",
-  "cfg.dzpageStale": "The name on DZPage could not be updated — register the server again there.",
+  "cfg.dzpageStale": "The name on DZPage could not be updated. Register the server again there.",
   "cfg.err.cfg_key_empty": "A value needs a key.",
   "cfg.err.cfg_key_invalid":
     "“{key}” is not a valid key: letters, digits and underscore, optionally ending in [].",
   "cfg.err.cfg_key_managed": "“{key}” is set by the panel above, not in this list.",
-  "cfg.err.cfg_key_twice": "“{key}” appears twice — DayZ would then decide which line counts.",
+  "cfg.err.cfg_key_twice": "“{key}” appears twice, and DayZ would then decide which line counts.",
 
   "panel.heading": "This panel",
   "panel.sub": "the panel software itself, updated from Git",
@@ -341,11 +341,11 @@ export const en = {
   "panel.mode.notify": "Only report it, ask me first",
   "panel.mode.off": "Do not look for updates",
   "panel.mode.hint":
-    "The panel checks GitHub every six hours. Installing restarts the panel — your game servers keep running. If the new version does not come up, the previous one is restored.",
+    "The panel checks GitHub every six hours. Installing restarts the panel; your game servers keep running. If the new version does not come up, the previous one is restored.",
   "panel.found": "Version {version} is available.",
   "panel.upToDate": "Version {version} is the latest one.",
   "panel.started":
-    "Update to {version} started. The panel restarts in a moment — reload this page in about a minute.",
+    "Update to {version} started. The panel restarts in a moment; reload this page in about a minute.",
   "panel.manual":
     "Version {version} is available, but this panel was installed by hand, so it cannot update itself. See the README for the update command.",
   "panel.result.failed": "The update to {version} failed: {message}",

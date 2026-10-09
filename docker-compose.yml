@@ -8,7 +8,7 @@
 #
 # - **Der Docker-Socket ist eingehaengt.** Anders kann das Panel keine
 #   Spielserver starten. Wer Zugriff auf diesen Socket hat, ist auf dieser
-#   Maschine faktisch root — das liegt an Docker, nicht am Panel. Wer das nicht
+#   Maschine faktisch root. Das liegt an Docker, nicht am Panel. Wer das nicht
 #   will, nimmt den Weg ueber install.sh: dort laeuft das Panel unprivilegiert.
 # - **Konfiguration und Daten liegen auf dem Wirt**, an denselben Pfaden wie
 #   innen. Das muss so sein: Die Spielserver-Container haengen ihr Verzeichnis
@@ -25,7 +25,7 @@ services:
     stop_grace_period: 30s
     environment:
       # Von aussen erreichbar macht man das Panel mit einem Reverse-Proxy mit
-      # TLS davor — nicht, indem man diese Veroeffentlichung aufmacht.
+      # TLS davor, nicht, indem man diese Veroeffentlichung aufmacht.
       DZPAGE_PANEL_BIND: 0.0.0.0
       DZPAGE_PANEL_REPO: https://github.com/006mi4/dayz-linux-gameserverpanel.git
     ports:

@@ -234,6 +234,41 @@ test("Zwei Installationen gleichzeitig: die zweite wartet statt abzubrechen", as
   assert.ok(waited.some((text) => /Wartet/.test(text)), waited.join(" | "));
 });
 
+test("Installationsfehler kommen mit festem Code bei dzpage.com an", async () => {
+  stub.queueJob({
+    id: "create-codes",
+    kind: "create",
+    serverId: null,
+    payload: { ...SERVER, name: "Fehlercodes", gamePort: 3102, queryPort: 28116, rconPort: 3106 },
+  });
+  const created = await resultOf("create-codes");
+  assert.equal(created.status, "done", created.detail);
+  const id = created.result.serverId;
+
+  // Das Verhalten haengt am Kontonamen (siehe fake-steamcmd.sh).
+  const cases = [
+    ["", "steam_no_account"],
+    ["abgelaufen_konto", "steam_session_expired"],
+    ["nosub_konto", "steam_no_license"],
+    ["dlfail_konto", "download_failed"],
+    ["nolib_konto", "missing_libraries"],
+  ];
+  try {
+    for (const [account, code] of cases) {
+      await setSetting(panel.app.db, KEYS.steamAccount, account);
+      stub.queueJob({ id: `codes-${code}`, kind: "update", serverId: id });
+      const result = await resultOf(`codes-${code}`, { timeoutMs: 30_000 });
+      assert.equal(result.status, "failed", `${code}: ${result.detail}`);
+      assert.equal(result.code, code, result.detail);
+      assert.ok(result.detail, `${code}: der deutsche Text bleibt als Einzelheit dabei`);
+    }
+  } finally {
+    await setSetting(panel.app.db, KEYS.steamAccount, "cachedslow_konto");
+  }
+  const row = await panel.app.db.get("SELECT install_state FROM servers WHERE id = ?", [id]);
+  assert.equal(row.install_state, "failed");
+});
+
 test("Protokoll von dzpage.com: letzte Zeilen, Zeilenzahl geprüft", async () => {
   stub.queueJob({ id: "logs-1", kind: "logs", serverId: remoteId, payload: { lines: 200 } });
   const logs = await resultOf("logs-1");

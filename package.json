@@ -1,12 +1,12 @@
 {
   "name": "dzpage-panel",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "description": "Selbst installierbares Gameserver-Panel fuer DayZ auf Linux, gekoppelt an ein DZPage-Konto.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.6.0"
   },
   "bin": {
     "dzpage-panel": "bin/dzpage-panel.js"

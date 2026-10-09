@@ -169,7 +169,7 @@ export function serverDzCfg(server) {
   // Der Kopf ist englisch, anders als die Kommentare hier: Diese Datei liegt
   // beim Kunden auf der Platte, und das Panel steht auf Rechnern in aller Welt.
   return `// Written by dzpage-panel. Edit these values in the panel under
-// "Game servers -> Configuration" — changes made directly to this file are
+// "Game servers -> Configuration". Changes made directly to this file are
 // lost the next time the panel writes it.
 hostname = ${formatCfgValue(server.name)};
 maxPlayers = ${Number(server.max_players)};

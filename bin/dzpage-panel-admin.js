@@ -2,7 +2,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { ReadStream } from "node:tty";
 import { loadConfig, saveConfig } from "../src/config.js";
 import { openDatabase } from "../src/db/index.js";
 import { findUserByUsername, setPassword } from "../src/store/users.js";
@@ -39,8 +38,12 @@ import { clearKeyRejected, isRejection, markKeyRejected, readKeyRejection } from
  *   reset-password [benutzer]               neues Passwort erzeugen
  *
  * Exit-Codes: 0 erledigt, 1 Fehler, 3 schon gekoppelt (link ohne --force,
- * und DZPage nimmt den gespeicherten Schluessel noch an).
+ * und DZPage nimmt den gespeicherten Schluessel noch an), 4 an der Kontofrage
+ * verneint, abgebrochen oder unbeantwortet (auf der Maschine aendert sich
+ * nichts; install.sh versucht es dann nicht noch einmal mit Link und Code).
  */
+
+const EXIT_DECLINED = 4;
 
 function fail(message, code = 1) {
   process.stderr.write(`${message}\n`);
@@ -106,76 +109,117 @@ function plain(value) {
 
 /** Strg+C, Strg+D oder ein aufgelegtes Terminal an der Rueckfrage. */
 const ABORTED = Symbol("abgebrochen");
+/** Niemand hat innerhalb von ANSWER_SECONDS geantwortet. */
+const TIMED_OUT = Symbol("keine Antwort");
 const PROMPT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
-/** So lange wird vor der Frage verworfen, was schon im Terminal wartet. */
-const DRAIN_MS = 200;
+
+/** So lange wartet die Rueckfrage; danach gilt sie als verneint. Die Tests kuerzen das. */
+const ANSWER_SECONDS = (() => {
+  const wanted = Number(process.env.DZPAGE_PANEL_ANSWER_SECONDS);
+  return Number.isInteger(wanted) && wanted >= 1 && wanted <= 3600 ? wanted : 300;
+})();
+
+/**
+ * Die Frage stellt eine kleine bash, Node wartet nur auf ihr Ergebnis.
+ *
+ * Der Grund ist "curl ... | sudo bash": Ist stdin von sudo eine Pipe, startet
+ * sudo (Vorgabe use_pty auf Ubuntu und Debian) den Befehl als Hintergrund-
+ * Prozessgruppe in einem eigenen Terminal und reicht Tastatureingaben erst
+ * durch, wenn der Befehl das Terminal anfasst und dafuer SIGTTIN oder SIGTTOU
+ * bekommt. Node wartet per epoll darauf, dass Daten da sind, und loest beides
+ * nie aus; die Frage hing fuer immer. Ein "read -t" hilft allein auch nicht:
+ * bash 5.2 (Ubuntu 24.04, Debian 12 und 13) wartet dabei erst per select und
+ * liest nie. Deshalb setzt die bash zuerst die Terminal-Einstellungen auf
+ * genau die, die schon gelten. Das aendert nichts, ist aber aus dem
+ * Hintergrund heraus ein SIGTTOU, und sudo holt den Befehl in den Vordergrund.
+ * Gemessen mit sudo 1.9.9/bash 5.1 und sudo 1.9.15/bash 5.2.
+ *
+ * Blockierend in Node zu lesen hielte dagegen Strg+C auf, bis jemand Enter
+ * drueckt; so bleibt Node frei fuer Signale und das Zeitlimit.
+ *
+ * Was vor der Frage als ganze Zeile getippt wurde, etwa ein Enter waehrend des
+ * Wartens auf die Bestaetigung, ist keine Antwort darauf und wird verworfen;
+ * sudo reicht es erst nach dem Wechsel in den Vordergrund nach, deshalb die
+ * kurze Schleife danach.
+ *
+ * Exit: 0 mit der Antwort auf stdout, 1 Strg+D oder Terminal weg, 3 kein
+ * Terminal, 124 keine Antwort in der Frist.
+ */
+const ASK_SCRIPT = `
+exec 3<>/dev/tty || exit 3
+settings=$(stty -g <&3 2>/dev/null) && stty "$settings" <&3 2>/dev/null
+while IFS= read -r -t 0.3 _ <&3; do :; done
+printf '%s' "$1" >&3
+IFS= read -r -t "$2" answer <&3
+rc=$?
+[ "$rc" -gt 128 ] && exit 124
+[ "$rc" -eq 0 ] || exit 1
+printf '%s' "$answer"
+`;
+
+/** Text direkt ins Terminal, etwa der Zeilenumbruch nach Strg+C. Ohne Terminal: nichts. */
+function toTerminal(text) {
+  try {
+    const fd = openSync("/dev/tty", "w");
+    try {
+      writeSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    /* Terminal schon weg */
+  }
+}
 
 /**
  * Eine Frage direkt an das Terminal, nicht an stdin: Bei "curl ... | sudo bash"
  * ist stdin das Skript. Ohne Terminal (Automatisierung) gibt es keine Antwort
- * (null), und dann gilt die Voreinstellung.
- *
- * Gelesen wird, ohne den Prozess zu blockieren: Ein blockierendes Lesen hielte
- * auch Strg+C auf, bis jemand Enter drueckt. So kommt ein Abbruch als ABORTED
- * zurueck, und der Aufrufer kann noch aufraeumen.
- *
- * Was vor der Frage getippt wurde, etwa ein Enter waehrend des Wartens auf die
- * Bestaetigung, ist keine Antwort darauf und wird verworfen.
+ * (null), und dann gilt die Voreinstellung. Sonst die Antwort, ABORTED oder
+ * TIMED_OUT.
  */
 function askTerminal(question) {
-  let fd;
   try {
-    fd = openSync("/dev/tty", "r+");
+    closeSync(openSync("/dev/tty", "r+"));
   } catch {
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
-    let input = null;
     let answer = "";
-    let asking = false;
     let done = false;
+    let child = null;
+    let safety = null;
     const finish = (value) => {
       if (done) return;
       done = true;
       for (const signal of PROMPT_SIGNALS) process.off(signal, onSignal);
-      // Der Lesestrom schliesst seinen Deskriptor selbst.
-      if (input) input.destroy();
-      else closeSync(fd);
+      clearTimeout(safety);
+      if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
       resolve(value);
     };
     const onSignal = () => {
-      try {
-        writeSync(fd, "\n");
-      } catch {
-        /* Terminal schon weg */
-      }
+      toTerminal("\n");
       finish(ABORTED);
     };
     for (const signal of PROMPT_SIGNALS) process.on(signal, onSignal);
-    try {
-      input = new ReadStream(fd);
-    } catch {
-      finish(ABORTED);
-      return;
-    }
-    input.setEncoding("utf8");
-    input.on("data", (chunk) => {
-      if (!asking) return;
-      answer += chunk;
-      if (answer.includes("\n")) finish(answer.split("\n")[0].trim());
+    // Ohne den eigenen Prozess bleibt die Frage sonst offen, falls bash ihre
+    // Frist nicht einhaelt (angehalten, Terminal haengt).
+    safety = setTimeout(() => finish(TIMED_OUT), (ANSWER_SECONDS + 30) * 1000);
+    // Eigene, leere Umgebung: bash liest dann auch kein BASH_ENV.
+    child = spawn("bash", ["-c", ASK_SCRIPT, "dzpage-panel-ask", question, String(ANSWER_SECONDS)], {
+      stdio: ["ignore", "pipe", "ignore"],
+      env: { PATH: "/usr/local/bin:/usr/bin:/bin" },
     });
-    input.on("end", () => finish(ABORTED));
-    input.on("error", () => finish(ABORTED));
-    setTimeout(() => {
-      if (done) return;
-      try {
-        writeSync(fd, question);
-      } catch {
-        finish(ABORTED);
-        return;
-      }
-      asking = true;
-    }, DRAIN_MS);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      answer += chunk;
+    });
+    child.on("error", () => finish(ABORTED));
+    child.on("close", (code) => {
+      if (code === 0) finish(answer.trim());
+      else if (code === 124) finish(TIMED_OUT);
+      else if (code === 3) finish(null);
+      else finish(ABORTED);
+    });
   });
 }
 
@@ -184,7 +228,8 @@ function askTerminal(question) {
  * gilt, steht im Terminal, an welches Konto der Server gebunden wird. Wer den
  * Kurzcode etwa von einem Screenshot abliest und schneller bestaetigt als der
  * Besitzer, faellt genau hier auf. Verbunden wird nur auf ein klares Ja (oder
- * Enter); wer abbricht oder etwas anderes tippt, hat nicht zugestimmt.
+ * Enter); wer abbricht, etwas anderes tippt oder nicht antwortet, hat nicht
+ * zugestimmt.
  */
 async function confirmAccount(account, assumeYes) {
   if (assumeYes) return true;
@@ -193,6 +238,15 @@ async function confirmAccount(account, assumeYes) {
   );
   if (answer === null) return true;
   if (answer === ABORTED) return false;
+  if (answer === TIMED_OUT) {
+    const minutes = Math.round(ANSWER_SECONDS / 60);
+    toTerminal(
+      minutes >= 1
+        ? `\nKeine Antwort innerhalb von ${minutes === 1 ? "einer Minute" : `${minutes} Minuten`}.\n`
+        : "\nKeine Antwort.\n",
+    );
+    return false;
+  }
   return /^(|j|ja|y|yes)$/i.test(answer);
 }
 
@@ -220,11 +274,14 @@ async function declineKey(config, key) {
   } finally {
     for (const signal of PROMPT_SIGNALS) process.off(signal, ignore);
   }
-  if (revoked.ok) fail("Nicht verbunden. Der neue Schlüssel ist auf dzpage.com widerrufen; auf diesem Server ändert sich nichts.");
+  if (revoked.ok) {
+    fail("Nicht verbunden. Der neue Schlüssel ist auf dzpage.com widerrufen; auf diesem Server ändert sich nichts.", EXIT_DECLINED);
+  }
   fail(
     "Nicht verbunden; auf diesem Server ändert sich nichts. " +
       `Den neuen Schlüssel (${key.slice(0, 16)}…) konnte das Panel auf dzpage.com nicht widerrufen (${revoked.code}). ` +
       "Ist es dein Konto, widerrufe ihn dort unter RCon bei den Panel-Schlüsseln.",
+    EXIT_DECLINED,
   );
 }
 

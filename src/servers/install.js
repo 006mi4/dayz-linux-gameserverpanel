@@ -32,10 +32,40 @@ const PATTERNS = {
 
 const BUILD_ID = /^\d{1,20}$/;
 
+/**
+ * Feste Codes fuer das, was beim Installieren typischerweise schiefgeht. Sie
+ * gehen mit dem Ergebnis eines Auftrags an dzpage.com, das sie in der Sprache
+ * des Nutzers zeigt; der deutsche Text bleibt als Einzelheit dabei. Neue
+ * Codes erst hier eintragen: Der Abholer gibt nur diese weiter.
+ */
+export const INSTALL_ERROR_CODES = Object.freeze({
+  /** Kein Steam-Konto hinterlegt. */
+  noAccount: "steam_no_account",
+  /** SteamCMD fragt nach dem Passwort: das gemerkte Sitzungstoken traegt nicht mehr. */
+  sessionExpired: "steam_session_expired",
+  /** "No subscription": Das Konto besitzt DayZ nicht. */
+  noLicense: "steam_no_license",
+  /** DayZServer oder SteamCMD findet Systembibliotheken nicht. */
+  missingLibraries: "missing_libraries",
+  /** SteamCMD selbst oder die Spieldateien liessen sich nicht laden. */
+  downloadFailed: "download_failed",
+});
+
+export const KNOWN_INSTALL_ERRORS = new Set(Object.values(INSTALL_ERROR_CODES));
+
+function installError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
 function reason(output) {
   const match = output.match(PATTERNS.failed);
   return match ? match[0].replace(/\s+/g, " ").trim().slice(0, 200) : "SteamCMD hat den Abschluss nicht bestaetigt.";
 }
+
+/** "...: error while loading shared libraries: libstdc++.so.6: cannot open ..." */
+const LOADER_ERROR = /error while loading shared libraries: ([^\s:]+)/;
 
 /** Die Build-Nummer der installierten Spieldateien, oder null. */
 export function installedBuildId(id) {
@@ -54,8 +84,15 @@ export function installedBuildId(id) {
  * zeigt sie live in der Oberflaeche.
  */
 export async function installGameFiles({ config, server, account, job }) {
-  if (!account) throw new Error("Es ist kein Steam-Konto hinterlegt — bitte zuerst bei Steam anmelden.");
-  const found = await ensureSteamCmd(config, job);
+  if (!account) {
+    throw installError(INSTALL_ERROR_CODES.noAccount, "Es ist kein Steam-Konto hinterlegt. Bitte zuerst bei Steam anmelden.");
+  }
+  let found;
+  try {
+    found = await ensureSteamCmd(config, job);
+  } catch (err) {
+    throw installError(INSTALL_ERROR_CODES.downloadFailed, err.message);
+  }
   const target = join(serverDir(server.id), "game");
 
   job.append(`Installiere DayZ (App ${DAYZ_SERVER_APP_ID}) nach ${target}.`);
@@ -77,17 +114,39 @@ export async function installGameFiles({ config, server, account, job }) {
   });
 
   try {
-    const step = await pty.waitFor(
-      { done: PATTERNS.done, failed: PATTERNS.failed, password: PATTERNS.password, cached: PATTERNS.cached },
-      // Vier Gigabyte brauchen auf einer schwachen Leitung ihre Zeit.
-      { timeoutMs: 3 * 60 * 60 * 1000 },
-    );
+    let step;
+    try {
+      step = await pty.waitFor(
+        { done: PATTERNS.done, failed: PATTERNS.failed, password: PATTERNS.password, cached: PATTERNS.cached },
+        // Vier Gigabyte brauchen auf einer schwachen Leitung ihre Zeit.
+        { timeoutMs: 3 * 60 * 60 * 1000 },
+      );
+    } catch (err) {
+      throw installError(INSTALL_ERROR_CODES.downloadFailed, err.message);
+    }
 
     if (step.name === "password" || step.name === "cached") {
-      throw new Error("SteamCMD fragt nach einem Passwort — die Steam-Sitzung ist abgelaufen. Bitte neu anmelden.");
+      throw installError(
+        INSTALL_ERROR_CODES.sessionExpired,
+        "SteamCMD fragt nach einem Passwort: Die Steam-Sitzung ist abgelaufen. Bitte neu anmelden.",
+      );
     }
-    if (step.name === "failed") throw new Error(reason(pty.output));
-    if (step.name === "exit") throw new Error("SteamCMD hat sich beendet, ohne die Installation zu bestaetigen.");
+    if (step.name === "failed") {
+      const text = reason(pty.output);
+      throw installError(/No subscription/i.test(text) ? INSTALL_ERROR_CODES.noLicense : INSTALL_ERROR_CODES.downloadFailed, text);
+    }
+    if (step.name === "exit") {
+      // Ohne die 32-Bit-Bibliotheken (install.sh --no-steam-deps) startet
+      // SteamCMD gar nicht erst; der Lader sagt dann, was fehlt.
+      const loader = pty.output.match(LOADER_ERROR);
+      if (loader) {
+        throw installError(
+          INSTALL_ERROR_CODES.missingLibraries,
+          `SteamCMD findet die Systembibliothek ${loader[1]} nicht. Bitte die 32-Bit-Bibliotheken nachinstallieren (Debian und Ubuntu: lib32gcc-s1).`,
+        );
+      }
+      throw installError(INSTALL_ERROR_CODES.downloadFailed, "SteamCMD hat sich beendet, ohne die Installation zu bestaetigen.");
+    }
   } finally {
     pty.kill();
   }
@@ -180,7 +239,8 @@ export async function provisionServer({ config, server, account, job, runtime, r
           : "Bibliotheken von DayZServer nicht geprüft (ldd oder DayZServer fehlt).",
       );
     } else if (missing.length) {
-      throw new Error(
+      throw installError(
+        INSTALL_ERROR_CODES.missingLibraries,
         `DayZServer findet diese Systembibliotheken nicht: ${missing.join(", ")}. ` +
           "Bitte über den Paketmanager nachinstallieren und die Installation wiederholen.",
       );

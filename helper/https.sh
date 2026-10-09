@@ -33,6 +33,35 @@ note() { printf '  %s\n' "$*"; }
 warn() { printf '  \033[33mAchtung:\033[0m %s\n' "$*"; }
 die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# apt-get, das auf eine belegte Paketverwaltung wartet, statt sofort mit 100
+# abzubrechen (dieselbe Funktion wie in install.sh, dort steht das Warum).
+APT_WAIT_SECONDS=600
+apt_get() {
+  local deadline=$((SECONDS + APT_WAIT_SECONDS)) out rc locked waited=0 left
+  while :; do
+    left=$((deadline - SECONDS))
+    [ "$left" -ge 1 ] || left=1
+    rc=0
+    out=$(LC_ALL=C apt-get -o "DPkg::Lock::Timeout=$left" "$@" 2>&1) || rc=$?
+    locked=0
+    if [ "$rc" -ne 0 ] && grep -qE 'Could not get lock|Unable to lock|Unable to acquire' <<<"$out"; then
+      locked=1
+    fi
+    if [ "$locked" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then
+      if [ "$rc" -eq 0 ]; then
+        [ -z "$out" ] || printf '%s\n' "$out"
+      else
+        printf '%s\n' "$out" >&2
+      fi
+      [ "$locked" -eq 0 ] || warn "Die Paketverwaltung war $APT_WAIT_SECONDS Sekunden lang belegt. Spaeter erneut versuchen." >&2
+      return "$rc"
+    fi
+    [ "$waited" -eq 1 ] || note "Die Paketverwaltung ist gerade belegt (meist automatische Updates nach dem Start). Warte, bis sie frei ist ..." >&2
+    waited=1
+    sleep 10
+  done
+}
+
 [ "$(id -u)" -eq 0 ] || die "Bitte als root ausfuehren (sudo)."
 
 # Schreibt stdin als Datei, die root gehoert, nach $CONFIG_DIR. Das Verzeichnis
@@ -78,16 +107,16 @@ install_caddy() {
     || die "Caddy fehlt, und ohne apt kann ich es nicht installieren. Anleitung: https://caddyserver.com/docs/install"
   note "installiere Caddy aus dem offiziellen Paketarchiv"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y -qq gnupg curl ca-certificates >/dev/null
+  apt_get update -qq
+  apt_get install -y -qq gnupg curl ca-certificates >/dev/null
   # Die Befehle stehen so in https://caddyserver.com/docs/install (Debian, Ubuntu).
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
     | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
     > /etc/apt/sources.list.d/caddy-stable.list
   chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -qq
-  apt-get install -y -qq caddy >/dev/null
+  apt_get update -qq
+  apt_get install -y -qq caddy >/dev/null
   note "$(caddy version 2>/dev/null | cut -d' ' -f1) installiert"
 }
 

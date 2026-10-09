@@ -72,7 +72,7 @@ async function dashboard(rc) {
     }),
     tile({
       label: t("dash.tile.gameFiles"),
-      value: available || "—",
+      value: available || "-",
       sub: available
         ? outdated
           ? t("dash.tile.outdated", { value: outdated })

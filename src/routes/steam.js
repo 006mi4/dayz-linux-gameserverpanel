@@ -98,7 +98,7 @@ export async function page(rc) {
           inSetup,
           connected: progress.steamDone && !ptyMissing,
           message: ptyMissing
-            ? "script(1) aus util-linux fehlt auf diesem System — ohne Terminal kann SteamCMD nicht nach dem Passwort fragen."
+            ? "script(1) aus util-linux fehlt auf diesem System. Ohne Terminal kann SteamCMD nicht nach dem Passwort fragen."
             : progress.steamDone
               ? rc.t("setup.steam.success", { account })
               : null,

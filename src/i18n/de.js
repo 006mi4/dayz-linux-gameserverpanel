@@ -74,7 +74,7 @@ export const de = {
 
   "setup.steam.heading": "Bei Steam anmelden",
   "setup.steam.lede":
-    "Ein DayZ-Linux-Server braucht ein Steam-Konto, das DayZ besitzt — anonym lehnt Steam den Download ab. Das Passwort gibst du einmal ein: SteamCMD merkt sich danach selbst ein Sitzungstoken, und das Panel speichert das Passwort nicht.",
+    "Ein DayZ-Linux-Server braucht ein Steam-Konto, das DayZ besitzt; anonym lehnt Steam den Download ab. Das Passwort gibst du einmal ein: SteamCMD merkt sich danach selbst ein Sitzungstoken, und das Panel speichert das Passwort nicht.",
   "setup.steam.account": "Steam-Kontoname",
   "setup.steam.password": "Steam-Passwort",
   "setup.steam.passwordHint": "Wird direkt an SteamCMD durchgereicht und danach verworfen.",
@@ -96,20 +96,20 @@ export const de = {
   "setup.steam.verify": "Gemerkte Anmeldung prüfen",
   "setup.steam.verifyHint":
     "Startet SteamCMD einmal ohne Passwort. Klappt das, laufen Download und Aktualisierung später ohne Zutun.",
-  "setup.steam.verifyOk": "Das Sitzungstoken trägt — {account} meldet sich ohne Passwort an.",
+  "setup.steam.verifyOk": "Das Sitzungstoken trägt: {account} meldet sich ohne Passwort an.",
   "setup.steam.verifyFailed": "Das Sitzungstoken trägt nicht: {message}",
   "setup.steam.busy": "Es läuft schon ein SteamCMD-Vorgang.",
 
   "setup.dzpage.heading": "Mit dem DZPage-Konto verbinden",
   "setup.dzpage.lede":
-    "Erstelle unter {url} einen Panel-Schlüssel und trage ihn hier ein. Der Schlüssel darf Server registrieren und Zustand melden — mehr nicht. Das Panel ruft immer nur bei DZPage an, für das Panel selbst muss also kein Port geöffnet werden. Für die Spielserver schon: Spieler und das RCon von DZPage erreichen sie von außen.",
+    "Erstelle unter {url} einen Panel-Schlüssel und trage ihn hier ein. Der Schlüssel darf Server registrieren und Zustand melden, mehr nicht. Das Panel ruft immer nur bei DZPage an, für das Panel selbst muss also kein Port geöffnet werden. Für die Spielserver schon: Spieler und das RCon von DZPage erreichen sie von außen.",
   "setup.dzpage.key": "Panel-Schlüssel",
   "setup.dzpage.keyHint": "Beginnt mit dzp_panel_ und wird auf DZPage nur einmal angezeigt.",
   "setup.dzpage.name": "Name dieses Panels",
   "setup.dzpage.nameHint": "Erscheint so in deinem DZPage-Konto, zum Beispiel „Heimserver“.",
   "setup.dzpage.connect": "Verbinden",
   "setup.dzpage.connected": "Verbunden mit dem Konto {account}.",
-  "setup.dzpage.err.missing_key": "Das sieht nicht wie ein Panel-Schlüssel aus — er beginnt mit dzp_panel_.",
+  "setup.dzpage.err.missing_key": "Das sieht nicht wie ein Panel-Schlüssel aus. Er beginnt mit dzp_panel_.",
   "setup.dzpage.err.invalid_key": "DZPage kennt diesen Schlüssel nicht.",
   "setup.dzpage.err.revoked": "Dieser Schlüssel wurde widerrufen. Erstelle auf DZPage einen neuen.",
   "setup.dzpage.err.bad_request": "DZPage hat die Anfrage abgelehnt.",
@@ -195,7 +195,7 @@ export const de = {
   "servers.rconPort": "RCon-Port",
   "servers.rconPassword": "RCon-Passwort",
   "servers.rconPasswordHint":
-    "Keine Leerzeichen — BattlEye speichert es ohne Anführungszeichen. Zufallswert ist schon eingetragen.",
+    "Keine Leerzeichen: BattlEye speichert es ohne Anführungszeichen. Zufallswert ist schon eingetragen.",
   "servers.maxPlayers": "Spieler höchstens",
   "servers.mission": "Mission",
   "servers.limits": "Ressourcengrenzen",
@@ -278,12 +278,12 @@ export const de = {
   "updates.mode.notify": "Nur melden",
   "updates.mode.auto": "Automatisch aktualisieren",
   "updates.mode.autoWarning":
-    "„Automatisch aktualisieren“ hält den Server an, tauscht die Spieldateien und startet ihn wieder — ohne Vorwarnung im Spiel. Für einen Server, auf dem Leute spielen, ist „Nur melden“ die bessere Wahl.",
+    "„Automatisch aktualisieren“ hält den Server an, tauscht die Spieldateien und startet ihn wieder, ohne Vorwarnung im Spiel. Für einen Server, auf dem Leute spielen, ist „Nur melden“ die bessere Wahl.",
   "updates.schedule.heading": "Automatische Prüfung",
   "updates.schedule.sub": "gilt für alle Server dieses Panels",
   "updates.schedule.enable": "Regelmäßig bei Steam nachfragen",
   "updates.schedule.hint":
-    "Die Abfrage meldet sich anonym bei Steam an und lädt nichts herunter. Sie funktioniert auch ohne Steam-Anmeldung — die braucht erst das Herunterladen.",
+    "Die Abfrage meldet sich anonym bei Steam an und lädt nichts herunter. Sie funktioniert auch ohne Steam-Anmeldung; die braucht erst das Herunterladen.",
   "updates.schedule.interval": "Abstand",
   "updates.servers.heading": "Server",
   "updates.servers.sub": "was passieren soll, wenn eine neue Fassung erscheint",
@@ -301,31 +301,31 @@ export const de = {
   "updates.err.check": "Die letzte Prüfung ist fehlgeschlagen: {message}",
 
   "cfg.title": "Konfiguration",
-  "cfg.lede": "serverDZ.cfg für {name}. Das Panel schreibt diese Datei — bearbeitet wird sie hier, nicht auf der Platte.",
+  "cfg.lede": "serverDZ.cfg für {name}. Das Panel schreibt diese Datei, bearbeitet wird sie hier, nicht auf der Platte.",
   "cfg.basics.heading": "Grundwerte",
   "cfg.basics.sub": "die braucht das Panel auch anderswo, deshalb haben sie eigene Felder",
   "cfg.portsFixed":
-    "Ports lassen sich hier nicht ändern. Sie hängen an der Anmeldung bei DZPage, an BattlEye und an den anderen Servern dieses Panels — ein Port ist keine Einstellung, sondern die Identität des Servers.",
+    "Ports lassen sich hier nicht ändern. Sie hängen an der Anmeldung bei DZPage, an BattlEye und an den anderen Servern dieses Panels. Ein Port ist keine Einstellung, sondern die Identität des Servers.",
   "cfg.entries.heading": "serverDZ.cfg",
-  "cfg.entries.sub": "alle übrigen Werte — ändern, entfernen oder einen hinzufügen, den das Panel nicht kennt",
+  "cfg.entries.sub": "alle übrigen Werte: ändern, entfernen oder einen hinzufügen, den das Panel nicht kennt",
   "cfg.key": "Schlüssel",
   "cfg.value": "Wert",
   "cfg.remove": "Entfernen",
   "cfg.newKey": "neuer Schlüssel",
   "cfg.newValue": "Wert",
   "cfg.entriesHint":
-    "Zahlen werden so geschrieben, wie sie dastehen, alles andere in Anführungszeichen. Ein Wert, der mit { oder \" beginnt, wird unverändert übernommen — so geht motd[] = {\"Zeile 1\",\"Zeile 2\"}. Die Vorschau unten zeigt genau das, was geschrieben wird.",
+    "Zahlen werden so geschrieben, wie sie dastehen, alles andere in Anführungszeichen. Ein Wert, der mit { oder \" beginnt, wird unverändert übernommen, so geht motd[] = {\"Zeile 1\",\"Zeile 2\"}. Die Vorschau unten zeigt genau das, was geschrieben wird.",
   "cfg.defaults": "Auslieferungszustand",
   "cfg.preview.heading": "Vorschau",
   "cfg.preview.sub": "was das Panel in serverDZ.cfg schreibt",
   "cfg.saved": "Gespeichert.",
   "cfg.savedRestart": "Gespeichert. Der Server übernimmt die Datei beim nächsten Neustart.",
-  "cfg.dzpageStale": "Der Name bei DZPage ließ sich nicht nachziehen — den Server dort erneut anmelden.",
+  "cfg.dzpageStale": "Der Name bei DZPage ließ sich nicht nachziehen. Den Server dort erneut anmelden.",
   "cfg.err.cfg_key_empty": "Zu einem Wert gehört ein Schlüssel.",
   "cfg.err.cfg_key_invalid":
     "„{key}“ ist kein gültiger Schlüssel: Buchstaben, Ziffern und Unterstrich, wahlweise mit [] am Ende.",
   "cfg.err.cfg_key_managed": "„{key}“ setzt das Panel oben, nicht diese Liste.",
-  "cfg.err.cfg_key_twice": "„{key}“ steht zweimal — dann entscheidet DayZ, welche Zeile gilt.",
+  "cfg.err.cfg_key_twice": "„{key}“ steht zweimal, dann entscheidet DayZ, welche Zeile gilt.",
 
   "panel.heading": "Dieses Panel",
   "panel.sub": "das Panel selbst, aktualisiert über Git",
@@ -344,11 +344,11 @@ export const de = {
   "panel.mode.notify": "nur melden, ich entscheide",
   "panel.mode.off": "gar nicht nachsehen",
   "panel.mode.hint":
-    "Das Panel sieht alle sechs Stunden bei GitHub nach. Beim Einspielen startet das Panel neu — die Spielserver laufen weiter. Kommt die neue Fassung nicht hoch, wird die vorherige wiederhergestellt.",
+    "Das Panel sieht alle sechs Stunden bei GitHub nach. Beim Einspielen startet das Panel neu, die Spielserver laufen weiter. Kommt die neue Fassung nicht hoch, wird die vorherige wiederhergestellt.",
   "panel.found": "Fassung {version} steht bereit.",
   "panel.upToDate": "Fassung {version} ist die neueste.",
   "panel.started":
-    "Aktualisierung auf {version} läuft. Das Panel startet gleich neu — diese Seite in etwa einer Minute neu laden.",
+    "Aktualisierung auf {version} läuft. Das Panel startet gleich neu; diese Seite in etwa einer Minute neu laden.",
   "panel.manual":
     "Fassung {version} steht bereit, aber dieses Panel wurde von Hand installiert und kann sich nicht selbst erneuern. Der Befehl dafür steht im README.",
   "panel.result.failed": "Die Aktualisierung auf {version} ist fehlgeschlagen: {message}",

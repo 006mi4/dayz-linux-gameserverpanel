@@ -176,7 +176,7 @@ export async function checkUpdates(app, { job = null, apply = false } = {}) {
   if (previous !== branch.buildId && outdated.length) {
     await recordEvent(db, {
       kind: "update.available",
-      message: `Neue DayZ-Fassung ${branch.buildId} — ${outdated.length} Server ist/sind älter`,
+      message: `Neue DayZ-Fassung ${branch.buildId}: ${outdated.length} Server ist/sind älter`,
     });
   }
 
@@ -193,7 +193,7 @@ export async function checkUpdates(app, { job = null, apply = false } = {}) {
         log.warn(`Automatische Aktualisierung von ${server.id} fehlgeschlagen: ${err.message}`);
         await recordEvent(db, {
           kind: "update.failed",
-          message: `${server.name}: Aktualisierung fehlgeschlagen — ${err.message}`,
+          message: `${server.name}: Aktualisierung fehlgeschlagen: ${err.message}`,
         }).catch(() => undefined);
       }
     }

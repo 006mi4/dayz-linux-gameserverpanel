@@ -88,7 +88,8 @@ case "${1:-}" in
     rc=$?
     set -e
     # Gekoppelt: Herzschlag und Abholer laufen erst mit dem Schluessel los,
-    # und den liest der Dienst beim Start.
+    # und den liest der Dienst beim Start. 3 heisst schon gekoppelt; 4 (an
+    # der Kontofrage verneint) geht unveraendert an install.sh weiter.
     [ "$rc" -eq 0 ] && systemctl restart dzpage-panel
     [ "$rc" -eq 3 ] && exit 0
     exit "$rc"

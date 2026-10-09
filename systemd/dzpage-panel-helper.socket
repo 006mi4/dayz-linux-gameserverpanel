@@ -1,5 +1,5 @@
 [Unit]
-Description=DZPage Panel — Socket des privilegierten Helfers
+Description=DZPage Panel: Socket des privilegierten Helfers
 
 [Socket]
 # Nur der Dienstbenutzer darf diesen Socket oeffnen. Damit braucht das Panel

@@ -276,8 +276,8 @@ function firewallCell(t, server, firewall) {
 
 function updateCard(t, { server, installed, available, state }) {
   const rows = [
-    [t("updates.installed"), `<span class="mono">${escapeHtml(installed || "—")}</span>`],
-    [t("updates.available"), `<span class="mono">${escapeHtml(available || "—")}</span>`],
+    [t("updates.installed"), `<span class="mono">${escapeHtml(installed || "-")}</span>`],
+    [t("updates.available"), `<span class="mono">${escapeHtml(available || "-")}</span>`],
     [t("servers.state.heading"), pill(state === "current" ? "ok" : state === "outdated" ? "warn" : "off", t(`updates.state.${state}`))],
     [t("updates.mode.heading"), escapeHtml(t(`updates.mode.${server.update_mode || "off"}`))],
   ]

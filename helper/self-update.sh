@@ -123,10 +123,10 @@ fi
 
 # Ab hier ist die neue Fassung durchgefallen: install.sh wartet selbst auf
 # /health und bricht ab, wenn der Dienst nicht hochkommt.
-log "Fehlstart — stelle $PREVIOUS wieder her"
+log "Fehlstart, stelle $PREVIOUS wieder her"
 git -C "$CHECKOUT" reset --hard --quiet "$PREVIOUS" >&3 2>&1 || log "Ruecknahme im Arbeitsverzeichnis fehlgeschlagen"
 if "$CHECKOUT/install.sh" "${INSTALL_ARGS[@]}" >&3 2>&1; then
-  write_result failed "Fassung ${VERSION#v} kam nicht hoch — alter Stand wiederhergestellt. Protokoll: $LOG" true
+  write_result failed "Fassung ${VERSION#v} kam nicht hoch, alter Stand wiederhergestellt. Protokoll: $LOG" true
 else
   write_result failed "Fassung ${VERSION#v} kam nicht hoch, und die Ruecknahme ebenfalls nicht. Protokoll: $LOG" true
 fi

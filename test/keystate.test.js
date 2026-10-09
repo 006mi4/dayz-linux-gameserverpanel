@@ -32,6 +32,15 @@ const { checkServerInput, createServer } = await import("../src/store/servers.js
 
 const HAS_SCRIPT = spawnSync("script", ["--version"]).status === 0;
 const noScript = HAS_SCRIPT ? false : "script(1) fehlt, ohne Terminal gibt es keine Rückfrage.";
+/** Exit-Code von link, wenn an der Kontofrage nicht zugestimmt wurde. */
+const DECLINED = 4;
+/**
+ * Der Weg des Kunden ("curl ... | sudo bash") laesst sich nur mit echtem sudo
+ * nachstellen; in der Test-VM laeuft die Suite als root, dort geht es ohne
+ * Passwort. Sonst bleibt er der Ende-zu-Ende-Pruefung.
+ */
+const HAS_SUDO = HAS_SCRIPT && spawnSync("sudo", ["-n", "true"]).status === 0;
+const noSudo = HAS_SUDO ? false : "sudo ohne Passwort fehlt.";
 
 test.after(async () => {
   await stub.stop();
@@ -66,11 +75,27 @@ const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
  * Wie am echten Terminal: Sobald die Frage dasteht, tippt der Mensch `keys`
  * (Text, oder Liste aus [Pause in ms, Text]). `early` tippt er schon vorher,
  * waehrend er noch auf die Bestaetigung wartet.
+ *
+ * `sudoPipe`: wie "curl ... | sudo bash". Ist stdin von sudo eine Pipe,
+ * startet sudo (Vorgabe use_pty) den Befehl als Hintergrund-Prozessgruppe und
+ * reicht Getipptes erst durch, wenn er das Terminal anfasst. sudo leert die
+ * Umgebung, deshalb steht sie ausdruecklich im Befehl.
  */
-function runAdminAtTerminal(args, keys, { early = null } = {}) {
-  const command = [process.execPath, ADMIN, ...args].map(quote).join(" ");
+function runAdminAtTerminal(args, keys, { early = null, env: extraEnv = {}, sudoPipe = false } = {}) {
+  let command = [process.execPath, ADMIN, ...args].map(quote).join(" ");
+  if (sudoPipe) {
+    const vars = {
+      DZPAGE_BASE_URL: stub.url,
+      DZPAGE_PANEL_CONFIG_DIR: process.env.DZPAGE_PANEL_CONFIG_DIR,
+      DZPAGE_PANEL_DATA_DIR: process.env.DZPAGE_PANEL_DATA_DIR,
+      DZPAGE_PANEL_LOG_LEVEL: "error",
+      ...extraEnv,
+    };
+    const assignments = Object.entries(vars).map(([name, value]) => quote(`${name}=${value}`));
+    command = `echo x | sudo -n env ${assignments.join(" ")} ${command}`;
+  }
   const child = spawn("script", ["-qec", command, "/dev/null"], {
-    env: { ...process.env, DZPAGE_BASE_URL: stub.url },
+    env: { ...process.env, DZPAGE_BASE_URL: stub.url, ...extraEnv },
     stdio: ["pipe", "pipe", "pipe"],
   });
   if (early) child.stdin.write(early);
@@ -132,7 +157,7 @@ async function waitFor(check, { timeoutMs = 15_000 } = {}) {
 
 test("Wer das Konto verneint, widerruft den neuen Schlüssel auf DZPage", { skip: noScript }, async () => {
   const result = await runAdminAtTerminal(["link", "--token", newToken("nein")], "n\n");
-  assert.equal(result.code, 1, result.output);
+  assert.equal(result.code, DECLINED, result.output);
   assert.match(result.output, /»TestKonto«/);
   assert.match(result.output, /Nicht verbunden\. Der neue Schlüssel ist auf dzpage\.com widerrufen/);
 
@@ -149,7 +174,7 @@ test("Wer das Konto verneint, widerruft den neuen Schlüssel auf DZPage", { skip
 test("Strg+C an der Rückfrage gilt als Nein, auch dann ist der Schlüssel widerrufen", { skip: noScript }, async () => {
   const before = stub.calls.revoke.length;
   const result = await runAdminAtTerminal(["link", "--token", newToken("abbruch")], "\x03");
-  assert.equal(result.code, 1, result.output);
+  assert.equal(result.code, DECLINED, result.output);
   assert.match(result.output, /widerrufen/);
   assert.equal(stub.calls.revoke.length, before + 1);
   assert.equal(storedKey(), null);
@@ -159,7 +184,7 @@ test("Kennt dzpage.com den Widerruf noch nicht, sagt das Terminal, was zu tun is
   stub.state.noRevoke = true;
   try {
     const result = await runAdminAtTerminal(["link", "--token", newToken("altseite")], "nein\n");
-    assert.equal(result.code, 1, result.output);
+    assert.equal(result.code, DECLINED, result.output);
     assert.match(result.output, /konnte das Panel auf dzpage\.com nicht widerrufen \(not_found\)/);
     assert.match(result.output, /unter RCon bei den Panel-Schlüsseln/);
     // Nur der Anfang des Schluessels, nie der ganze.
@@ -178,7 +203,7 @@ test("Ein zweites Strg+C während des Widerrufs bricht ihn nicht ab", { skip: no
       [150, "\x03"],
       [500, "\x03"],
     ]);
-    assert.equal(result.code, 1, result.output);
+    assert.equal(result.code, DECLINED, result.output);
     assert.match(result.output, /Widerrufe den neuen Schlüssel/);
     assert.match(result.output, /Der neue Schlüssel ist auf dzpage\.com widerrufen/);
     assert.equal(stub.calls.revoke.length, before + 1);
@@ -191,7 +216,7 @@ test("Was vor der Frage getippt wurde, ist keine Antwort darauf", { skip: noScri
   // Enter waehrend des Wartens auf die Bestaetigung: Frueher galt das als Ja.
   const before = stub.calls.revoke.length;
   const result = await runAdminAtTerminal(["link", "--token", newToken("vorab")], "n\n", { early: "\n" });
-  assert.equal(result.code, 1, result.output);
+  assert.equal(result.code, DECLINED, result.output);
   assert.equal(stub.calls.revoke.length, before + 1);
   assert.equal(storedKey(), null);
 });
@@ -199,7 +224,46 @@ test("Was vor der Frage getippt wurde, ist keine Antwort darauf", { skip: noScri
 test("Eine unklare Antwort verbindet nicht", { skip: noScript }, async () => {
   const before = stub.calls.revoke.length;
   const result = await runAdminAtTerminal(["link", "--token", newToken("unklar")], "vielleicht\n");
-  assert.equal(result.code, 1, result.output);
+  assert.equal(result.code, DECLINED, result.output);
+  assert.equal(stub.calls.revoke.length, before + 1);
+  assert.equal(storedKey(), null);
+});
+
+test("Ohne Antwort in der Frist gilt die Frage als verneint", { skip: noScript }, async () => {
+  const before = stub.calls.revoke.length;
+  const started = Date.now();
+  const result = await runAdminAtTerminal(["link", "--token", newToken("stumm")], [], {
+    env: { DZPAGE_PANEL_ANSWER_SECONDS: "2" },
+  });
+  assert.equal(result.code, DECLINED, result.output);
+  assert.match(result.output, /Keine Antwort/);
+  assert.match(result.output, /Der neue Schlüssel ist auf dzpage\.com widerrufen/);
+  assert.ok(Date.now() - started < 15_000, "endet mit der Frist, nicht erst viel später");
+  assert.equal(stub.calls.revoke.length, before + 1);
+  assert.equal(storedKey(), null);
+});
+
+test("Strg+D an der Rückfrage verbindet nicht", { skip: noScript }, async () => {
+  const before = stub.calls.revoke.length;
+  const result = await runAdminAtTerminal(["link", "--token", newToken("eof")], "\x04");
+  assert.equal(result.code, DECLINED, result.output);
+  assert.equal(stub.calls.revoke.length, before + 1);
+  assert.equal(storedKey(), null);
+});
+
+test("Unter curl | sudo kommt die Antwort an, obwohl der Befehl im Hintergrund startet", { skip: noSudo }, async () => {
+  // Bis 0.5.3 hing die Frage hier fuer immer; mit einem schlichten "read -t"
+  // kam unter bash 5.2 nichts an, und erst die Frist beendete sie.
+  const before = stub.calls.revoke.length;
+  const started = Date.now();
+  const result = await runAdminAtTerminal(["link", "--token", newToken("sudopipe")], "n\n", {
+    sudoPipe: true,
+    env: { DZPAGE_PANEL_ANSWER_SECONDS: "20" },
+  });
+  assert.equal(result.code, DECLINED, result.output);
+  assert.doesNotMatch(result.output, /Keine Antwort/, "das n kam an, nicht die Frist");
+  assert.match(result.output, /Der neue Schlüssel ist auf dzpage\.com widerrufen/);
+  assert.ok(Date.now() - started < 15_000, `dauerte ${Date.now() - started} ms`);
   assert.equal(stub.calls.revoke.length, before + 1);
   assert.equal(storedKey(), null);
 });

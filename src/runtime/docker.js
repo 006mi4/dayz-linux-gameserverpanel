@@ -57,7 +57,7 @@ function writeLauncher(id, server) {
 set -eu
 DIR=${MOUNT}
 GAME=$DIR/game
-[ -x "$GAME/DayZServer" ] || { echo "DayZServer fehlt in $GAME — Server nicht installiert." >&2; exit 78; }
+[ -x "$GAME/DayZServer" ] || { echo "DayZServer fehlt in $GAME, Server nicht installiert." >&2; exit 78; }
 mkdir -p "$DIR/profiles/battleye"
 if [ -f "$GAME/steamclient.so" ]; then
   mkdir -p "$DIR/.steam/sdk64"

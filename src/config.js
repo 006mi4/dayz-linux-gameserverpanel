@@ -77,7 +77,7 @@ export function loadConfig({ file = CONFIG_FILE, generateSecrets = true } = {}) 
   validate(config);
 
   if (raw && isWorldReadable(file)) {
-    log.warn(`Konfiguration ${file} ist fuer andere Benutzer lesbar — bitte "chmod 600" setzen.`);
+    log.warn(`Konfiguration ${file} ist fuer andere Benutzer lesbar. Bitte "chmod 600" setzen.`);
   }
 
   let changed = false;

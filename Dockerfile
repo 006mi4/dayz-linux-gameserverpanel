@@ -1,13 +1,13 @@
 # Laufzeit-Abbild fuer das DZPage Panel.
 #
-# Absicht: Das Abbild bringt nur mit, was das Panel zum Laufen braucht — Node,
+# Absicht: Das Abbild bringt nur mit, was das Panel zum Laufen braucht: Node,
 # git, die 32-Bit-Bibliotheken fuer SteamCMD und den Docker-Klienten. Der
 # Programmcode selbst liegt NICHT im Abbild, sondern in einem Datentraeger
 # (/opt/dzpage-panel), den der Einstieg beim ersten Start aus Git holt.
 #
 # Das ist keine Bequemlichkeit, sondern der Grund, warum es eine
-# Aktualisierung gibt: So laeuft in beiden Installationsarten derselbe Weg —
-# neues Etikett auschecken, neu starten. Sonst braeuchte der Docker-Weg einen
+# Aktualisierung gibt: So laeuft in beiden Installationsarten derselbe Weg
+# (neues Etikett auschecken, neu starten). Sonst braeuchte der Docker-Weg einen
 # Abbild-Speicher, ein Anmeldekonto dort und einen zweiten Update-Mechanismus.
 FROM debian:bookworm-slim
 
@@ -43,7 +43,7 @@ RUN set -eu; \
     curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${node_arch}.tar.xz"; \
     sha256sum -c --ignore-missing SHASUMS256.txt; \
     mkdir -p /usr/local/lib/node; \
-    tar -xJf "node-v${NODE_VERSION}-${node_arch}.tar.xz" -C /usr/local/lib/node --strip-components=1; \
+    tar -xJf "node-v${NODE_VERSION}-${node_arch}.tar.xz" -C /usr/local/lib/node --strip-components=1 --no-same-owner; \
     ln -s /usr/local/lib/node/bin/node /usr/local/bin/node; \
     rm -rf /tmp/*
 

@@ -31,7 +31,7 @@ if [ ! -d "$CHECKOUT/.git" ]; then
     git -C "$CHECKOUT" -c advice.detachedHead=false checkout --quiet "$tag"
     say "Fassung $tag"
   else
-    say "noch keine Fassung veroeffentlicht — nehme den Hauptzweig"
+    say "noch keine Fassung veroeffentlicht, nehme den Hauptzweig"
   fi
 fi
 git config --global --add safe.directory "$CHECKOUT" 2>/dev/null || true
@@ -45,7 +45,7 @@ attempts=$((attempts + 1))
 echo "$attempts" > "$ATTEMPTS"
 if [ "$attempts" -ge 3 ] && [ -s "$GOOD_REF" ]; then
   good=$(cat "$GOOD_REF")
-  say "dritter Startversuch — zurueck auf $good"
+  say "dritter Startversuch, zurueck auf $good"
   git -C "$CHECKOUT" reset --hard --quiet "$good" || say "Ruecknahme fehlgeschlagen"
   echo 0 > "$ATTEMPTS"
 fi

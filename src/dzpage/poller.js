@@ -7,7 +7,7 @@ import { checkServerInput, countServers, createServer, findPortConflict, getServ
 import { recordEvent } from "../store/events.js";
 import { isRejection, markKeyRejected } from "./keystate.js";
 import { runtimeFor } from "../runtime/index.js";
-import { steamProgress, updateGameFiles } from "../servers/install.js";
+import { KNOWN_INSTALL_ERRORS, steamProgress, updateGameFiles } from "../servers/install.js";
 import { writeServerFiles } from "../servers/config.js";
 import { removeServer } from "../servers/remove.js";
 import { log } from "../log.js";
@@ -326,7 +326,13 @@ export function createPoller(app) {
       clearInterval(ticker);
     }
     if (gone) throw new JobError("unknown_server", finished.error);
-    if (finished.status !== "ok") throw new JobError("install", finished.error || "Aktualisierung fehlgeschlagen.");
+    if (finished.status !== "ok") {
+      // Die bekannten Ursachen (kein Steam-Konto, abgelaufene Sitzung,
+      // fehlende Bibliotheken, Download gescheitert) mit festem Code, damit
+      // dzpage.com sie uebersetzen kann; alles andere bleibt "install".
+      const code = KNOWN_INSTALL_ERRORS.has(finished.errorCode) ? finished.errorCode : "install";
+      throw new JobError(code, finished.error || "Aktualisierung fehlgeschlagen.");
+    }
   }
 
   /** Loeschen ebenfalls als Vorgang: So kann keine Installation gleichzeitig in das Verzeichnis schreiben. */

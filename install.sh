@@ -20,8 +20,14 @@ DATA_DIR=/var/lib/dzpage-panel
 SERVICE_USER=dzpage
 UNIT=/etc/systemd/system/dzpage-panel.service
 CLI=/usr/local/sbin/dzpage-panel
+# Wie "engines" in package.json. node:sqlite gibt es ab 22.5, aber unter
+# 22.5.1 scheitert die Testsuite reproduzierbar ("disk I/O error" von SQLite);
+# 22.6, 22.7, 22.8, 22.10, 22.11, 22.12 und 24 bestehen sie.
 NODE_MAJOR_MIN=22
+NODE_MINOR_MIN=6
 SOURCE_DIR=$(cd "$(dirname "$0")" && pwd)
+# So lange warten die Fragen im Terminal auf eine Antwort.
+ANSWER_SECONDS=300
 
 WITH_STEAM_DEPS=1
 WITH_NODE_INSTALL=1
@@ -70,6 +76,40 @@ replace_root_file() {
   fi
   rm -f "$tmp"
   die "$dest liess sich nicht schreiben."
+}
+
+# apt-get, das auf eine belegte Paketverwaltung wartet, statt sofort mit 100
+# abzubrechen: Auf einem frisch gestarteten Server laufen oft gerade die
+# automatischen Updates. DPkg::Lock::Timeout allein reicht nicht, es deckt
+# nur die Sperren von dpkg ab; "apt-get update" (Paketlisten) und das
+# Herunterladen (Archiv) brechen trotzdem sofort ab, gemessen mit apt 2.4 und
+# 2.8. Deshalb ein neuer Versuch, solange apt eine Sperre meldet, insgesamt
+# hoechstens APT_WAIT_SECONDS lang. LC_ALL=C, damit die Meldung erkennbar ist.
+APT_WAIT_SECONDS=600
+apt_get() {
+  local deadline=$((SECONDS + APT_WAIT_SECONDS)) out rc locked waited=0 left
+  while :; do
+    left=$((deadline - SECONDS))
+    [ "$left" -ge 1 ] || left=1
+    rc=0
+    out=$(LC_ALL=C apt-get -o "DPkg::Lock::Timeout=$left" "$@" 2>&1) || rc=$?
+    locked=0
+    if [ "$rc" -ne 0 ] && grep -qE 'Could not get lock|Unable to lock|Unable to acquire' <<<"$out"; then
+      locked=1
+    fi
+    if [ "$locked" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then
+      if [ "$rc" -eq 0 ]; then
+        [ -z "$out" ] || printf '%s\n' "$out"
+      else
+        printf '%s\n' "$out" >&2
+      fi
+      [ "$locked" -eq 0 ] || warn "Die Paketverwaltung war $APT_WAIT_SECONDS Sekunden lang belegt. Spaeter erneut ausfuehren." >&2
+      return "$rc"
+    fi
+    [ "$waited" -eq 1 ] || note "Die Paketverwaltung ist gerade belegt (meist automatische Updates nach dem Start). Warte, bis sie frei ist ..." >&2
+    waited=1
+    sleep 10
+  done
 }
 
 [ "$(id -u)" -eq 0 ] || die "Bitte mit sudo ausfuehren."
@@ -161,49 +201,44 @@ if command -v apt-get >/dev/null 2>&1; then
     dpkg --print-foreign-architectures | grep -qx i386 || {
       note "i386-Architektur fuer SteamCMD ergaenzen"
       dpkg --add-architecture i386
-      apt-get update -qq
+      apt_get update -qq
     }
     dpkg -s lib32gcc-s1 >/dev/null 2>&1 || MISSING="$MISSING lib32gcc-s1"
   fi
   if [ -n "$MISSING" ]; then
     note "installiere:$MISSING"
-    apt-get update -qq
+    apt_get update -qq
     # shellcheck disable=SC2086
-    apt-get install -y -qq $MISSING
+    apt_get install -y -qq $MISSING
   else
     note "alles vorhanden"
   fi
 else
-  say "Kein apt gefunden — bitte selbst sicherstellen"
+  say "Kein apt gefunden, bitte selbst sicherstellen"
   note "util-linux (script), tar, xz, ca-certificates und die 32-Bit-Bibliothek"
   note "libgcc (i386) fuer SteamCMD muessen vorhanden sein."
 fi
 
 # ---------------------------------------------------------------- Node
 say "Node-Laufzeit"
-NODE_BIN=""
-for candidate in "$APP_DIR/node/bin/node" "$(command -v node || true)" /usr/bin/node /usr/local/bin/node; do
-  [ -n "$candidate" ] && [ -x "$candidate" ] || continue
-  major=$("$candidate" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
-  if [ "$major" -ge "$NODE_MAJOR_MIN" ]; then
-    NODE_BIN=$candidate
-    break
-  fi
-done
+case "$(uname -m)" in
+  x86_64) NODE_ARCH=linux-x64 ;;
+  aarch64|arm64) NODE_ARCH=linux-arm64 ;;
+  *) NODE_ARCH="" ;;
+esac
 
-if [ -z "$NODE_BIN" ] && [ "$WITH_NODE_INSTALL" -eq 1 ]; then
-  note "Kein Node $NODE_MAJOR_MIN+ gefunden — installiere eine eigene Laufzeit nach $APP_DIR/node"
-  TMP=$(mktemp -d)
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64) NODE_ARCH=linux-x64 ;;
-    aarch64|arm64) NODE_ARCH=linux-arm64 ;;
-    *) die "Nicht unterstuetzte Architektur: $ARCH — bitte Node $NODE_MAJOR_MIN+ selbst installieren." ;;
-  esac
-  # Jeder Schritt mit eigenem "|| exit 1": Links von "|| die" schaltet bash
-  # "set -e" auch innerhalb der Unterschale ab. Bis 0.4.0 lief deshalb eine
-  # falsche Pruefsumme einfach durch, und tar entpackte trotzdem.
-  ( cd "$TMP" || exit 1
+# Laedt die aktuelle Node-24-Laufzeit von nodejs.org, prueft die Pruefsumme
+# und entpackt sie nach $1, das es noch nicht geben darf. Alles darin gehoert
+# root, gleich, was im Archiv steht.
+#
+# Jeder Schritt mit eigenem "|| exit 1": Links von "|| die" schaltet bash
+# "set -e" auch innerhalb der Unterschale ab. Bis 0.4.0 lief deshalb eine
+# falsche Pruefsumme einfach durch, und tar entpackte trotzdem.
+fetch_node() {
+  local dest=$1 tmp rc=0
+  [ -n "$NODE_ARCH" ] || return 1
+  tmp=$(mktemp -d) || return 1
+  ( cd "$tmp" || exit 1
     curl -fsSL -O "https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt" || exit 1
     FILE=$(grep "$NODE_ARCH.tar.xz" SHASUMS256.txt | awk '{print $2}' | head -1)
     [ -n "$FILE" ] || exit 1
@@ -211,18 +246,102 @@ if [ -z "$NODE_BIN" ] && [ "$WITH_NODE_INSTALL" -eq 1 ]; then
     # Nur herunterladen reicht nicht: die Pruefsumme kommt von derselben Quelle,
     # deckt aber einen abgebrochenen oder verfaelschten Transport ab.
     sha256sum -c --ignore-missing --quiet SHASUMS256.txt || exit 1
-    mkdir -p "$APP_DIR/node" || exit 1
-    tar -xJf "$FILE" -C "$APP_DIR/node" --strip-components=1 || exit 1
-  ) || { rm -rf "$TMP"; die "Node konnte nicht installiert werden."; }
-  rm -rf "$TMP"
+    mkdir "$dest" || exit 1
+    # Ohne --no-same-owner uebernimmt tar als root den Besitzer aus dem
+    # Archiv, bei nodejs.org uid 1001 (siehe unten).
+    tar -xJf "$FILE" -C "$dest" --strip-components=1 --no-same-owner || exit 1
+    chown -R root:root "$dest" || exit 1
+  ) || rc=1
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+# Eine frische Laufzeit nach $APP_DIR/node: erst daneben laden und pruefen,
+# dann tauschen. $APP_DIR gehoert root, beide Umbenennungen kann sonst niemand
+# stoeren, und der laufende Dienst behaelt bis zu seinem Neustart die Datei,
+# die er geoeffnet hat.
+replace_node_runtime() {
+  local fresh="$APP_DIR/node.neu" old="$APP_DIR/node.alt"
+  # Bei der Erstinstallation gibt es $APP_DIR hier noch nicht.
+  install -d -m 0755 "$APP_DIR" || return 1
+  rm -rf "$fresh" "$old"
+  fetch_node "$fresh" || { rm -rf "$fresh"; return 1; }
+  if [ -e "$APP_DIR/node" ] || [ -L "$APP_DIR/node" ]; then
+    mv -T "$APP_DIR/node" "$old" || { rm -rf "$fresh"; return 1; }
+  fi
+  if ! mv -T "$fresh" "$APP_DIR/node"; then
+    if [ -e "$old" ]; then mv -T "$old" "$APP_DIR/node" || true; fi
+    rm -rf "$fresh"
+    return 1
+  fi
+  rm -rf "$old" || warn "$old liess sich nicht ganz entfernen; es wird nicht mehr benutzt."
+}
+
+# Bis 0.5.3 entpackte tar als root mit dem Besitzer aus dem Archiv: Die eigene
+# Laufzeit gehoerte uid 1001, und root fuehrt sie hier und bei jeder
+# Selbstaktualisierung aus. Wer uid 1001 hat, konnte bin/node gegen etwas
+# Eigenes tauschen oder gegen einen Verweis darauf. Eine solche Laufzeit wird
+# deshalb weder ausgefuehrt noch umgebaut (chown -R aendert an einem Verweis
+# nur den Verweis), sondern durch eine frisch geladene ersetzt.
+#
+# Klappt das Laden nicht, kommt die alte trotzdem weg, bevor die Installation
+# abbricht: Die Selbstaktualisierung nimmt danach den vorherigen Stand zurueck,
+# und dessen install.sh fuehrt $APP_DIR/node/bin/node sonst doch als root aus.
+# Der laufende Dienst behaelt seine geoeffnete Datei; die naechste
+# Aktualisierung (oder ein erneutes install.sh) laedt die Laufzeit dann neu.
+node_runtime_untrusted() {
+  [ -L "$APP_DIR/node" ] && return 0
+  [ -d "$APP_DIR/node" ] || return 1
+  [ -n "$(find "$APP_DIR/node" \( ! -user root -o ! -group root -o \( ! -type l -perm /022 \) \) -print -quit 2>/dev/null || true)" ]
+}
+discard_node_runtime() {
+  rm -rf "$APP_DIR/node.alt"
+  mv -T "$APP_DIR/node" "$APP_DIR/node.alt" || return 1
+  rm -rf "$APP_DIR/node.alt" || true
+}
+# Reste eines abgebrochenen Austauschs; benutzt werden sie nie.
+rm -rf "$APP_DIR/node.neu" "$APP_DIR/node.alt" || true
+if node_runtime_untrusted; then
+  if [ "$WITH_NODE_INSTALL" -eq 1 ]; then
+    note "Die Node-Laufzeit in $APP_DIR/node gehoert nicht root (Installationen bis 0.5.3); sie wird durch eine frisch geladene ersetzt."
+    if ! replace_node_runtime; then
+      discard_node_runtime || true
+      die "Die Node-Laufzeit liess sich nicht neu laden. Die alte gehoerte nicht root und ist entfernt; bitte erneut ausfuehren, sobald nodejs.org erreichbar ist."
+    fi
+    note "Pruefsumme stimmt (SHASUMS256.txt von nodejs.org)"
+  else
+    discard_node_runtime || die "$APP_DIR/node gehoert nicht root und liess sich nicht beiseitelegen."
+    note "Die Node-Laufzeit in $APP_DIR/node gehoerte nicht root und ist entfernt (--no-node)."
+  fi
+fi
+
+NODE_BIN=""
+for candidate in "$APP_DIR/node/bin/node" "$(command -v node || true)" /usr/bin/node /usr/local/bin/node; do
+  [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+  version=$("$candidate" -p 'process.versions.node' 2>/dev/null || echo 0.0.0)
+  major=${version%%.*}
+  minor=${version#*.}
+  minor=${minor%%.*}
+  case "$major:$minor" in *[!0-9:]*|:*|*:) continue ;; esac
+  if [ "$major" -gt "$NODE_MAJOR_MIN" ] || { [ "$major" -eq "$NODE_MAJOR_MIN" ] && [ "$minor" -ge "$NODE_MINOR_MIN" ]; }; then
+    NODE_BIN=$candidate
+    break
+  fi
+done
+
+if [ -z "$NODE_BIN" ] && [ "$WITH_NODE_INSTALL" -eq 1 ]; then
+  [ -n "$NODE_ARCH" ] \
+    || die "Nicht unterstuetzte Architektur: $(uname -m). Bitte Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer selbst installieren."
+  note "Kein Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer gefunden, installiere eine eigene Laufzeit nach $APP_DIR/node"
+  replace_node_runtime || die "Node konnte nicht installiert werden."
   note "Pruefsumme stimmt (SHASUMS256.txt von nodejs.org)"
   NODE_BIN="$APP_DIR/node/bin/node"
 fi
 
-[ -n "$NODE_BIN" ] || die "Node $NODE_MAJOR_MIN oder neuer wird gebraucht (oder ohne --no-node erneut versuchen)."
+[ -n "$NODE_BIN" ] || die "Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer wird gebraucht (oder ohne --no-node erneut versuchen)."
 note "$NODE_BIN ($("$NODE_BIN" --version))"
 
-# node:sqlite ist erst ab Node 24 stabil; davor braucht es einen Schalter.
+# node:sqlite braucht bis Node 22.12 einen Schalter.
 # Statt die Version zu raten, wird beides ausprobiert.
 NODE_FLAGS=""
 if ! "$NODE_BIN" -e 'require("node:sqlite")' >/dev/null 2>&1; then
@@ -230,7 +349,7 @@ if ! "$NODE_BIN" -e 'require("node:sqlite")' >/dev/null 2>&1; then
     NODE_FLAGS="--experimental-sqlite"
     note "node:sqlite braucht hier $NODE_FLAGS"
   else
-    die "Diese Node-Version kann node:sqlite nicht — bitte Node 24 oder neuer verwenden."
+    die "$NODE_BIN kann node:sqlite nicht. Bitte ein Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer mit node:sqlite verwenden."
   fi
 fi
 
@@ -238,12 +357,12 @@ fi
 if [ "$WITH_DOCKER" -eq 1 ]; then
   say "Docker-Laufzeit"
   if ! command -v docker >/dev/null 2>&1; then
-    die "Docker ist nicht installiert — erst Docker einrichten, dann erneut mit --with-docker."
+    die "Docker ist nicht installiert. Erst Docker einrichten, dann erneut mit --with-docker."
   fi
   # Ehrlich bleiben: Wer in der docker-Gruppe ist, kann auf dieser Maschine
   # alles. Das liegt an Docker, nicht am Panel — aber wissen sollte man es.
   note "ACHTUNG: Der Dienstbenutzer kommt in die Gruppe docker."
-  note "Das entspricht auf dieser Maschine faktisch Rootrechten — so ist Docker gebaut."
+  note "Das entspricht auf dieser Maschine faktisch Rootrechten, so ist Docker gebaut."
 fi
 
 say "Dienstbenutzer und Verzeichnisse"
@@ -387,7 +506,7 @@ if [ "$INSTALL_METHOD" = "git" ]; then
   note "Aktualisierung ueber $REPOSITORY"
 else
   rm -f "$APP_DIR/self-update.sh"
-  note "Von Hand installiert — das Panel meldet Aktualisierungen, spielt sie aber nicht ein."
+  note "Von Hand installiert: Das Panel meldet Aktualisierungen, spielt sie aber nicht ein."
 fi
 
 ARGS_JSON=""
@@ -502,23 +621,41 @@ note "Protokoll: sudo dzpage-panel logs   Zustand: sudo dzpage-panel status"
 
 # ---------------------------------------------------------------- Kopplung
 # Der Moment, um den es geht: Server und DZPage-Konto verbinden. Mit dem Code
-# aus dem Befehl von dzpage.com geht das ohne Rueckfrage; sonst zeigt das
-# Panel einen Link, der auf dzpage.com mit einem Klick bestaetigt wird. Nie
-# bei der Selbstaktualisierung (kein Terminal, und gekoppelt ist dann laengst).
+# aus dem Befehl von dzpage.com geht das bis auf die Frage nach dem Konto von
+# selbst; sonst zeigt das Panel einen Link, der auf dzpage.com mit einem Klick
+# bestaetigt wird. Nie bei der Selbstaktualisierung (kein Terminal, und
+# gekoppelt ist dann laengst).
 LINKED=0
 grep -q '"key": *"dzp_panel_' "$CONFIG_DIR/panel.json" 2>/dev/null && LINKED=1
 TERMINAL=0
 [ -t 1 ] && (exec < /dev/tty) 2>/dev/null && TERMINAL=1
 
-# Strg+C waehrend des Wartens soll nur die Kopplung abbrechen, nicht den Rest
+# Strg+C waehrend eines solchen Schritts soll nur ihn abbrechen, nicht den Rest
 # dieses Skripts. Ein Handler (statt ignorieren) gilt nur hier: Das Kind
-# bekommt das Signal wie gewohnt, dieses Skript laeuft danach weiter.
-pair() {
+# bekommt das Signal wie gewohnt, dieses Skript laeuft danach weiter. Fuer ein
+# "read" in diesem Skript selbst taugt das nicht, ein abgefangenes SIGINT
+# unterbricht "read -t" nicht (gemessen mit bash 5.1 und 5.2); dort liest eine
+# Unterschale ohne Handler.
+interactive() {
   local rc=0
   trap 'printf "\n"' INT
-  "$CLI" link "$@" || rc=$?
+  "$@" || rc=$?
   trap - INT
   return "$rc"
+}
+pair() { interactive "$CLI" link "$@"; }
+
+# Unter "curl ... | sudo bash" startet sudo dieses Skript als Hintergrund-
+# Prozessgruppe in einem eigenen Terminal und reicht Tastatureingaben erst
+# durch, wenn es das Terminal anfasst und dafuer SIGTTIN oder SIGTTOU bekommt.
+# Ein "read -t" tut das unter bash 5.2 nicht (es wartet per select), die
+# unveraenderten Einstellungen zu setzen schon (SIGTTOU). Deshalb vor jedem
+# Lesen mit Frist.
+claim_terminal() {
+  local settings
+  if settings=$(stty -g < /dev/tty 2>/dev/null); then
+    stty "$settings" < /dev/tty 2>/dev/null || true
+  fi
 }
 
 if [ "$LINKED" -eq 1 ]; then
@@ -534,13 +671,20 @@ if [ "$LINKED" -eq 1 ]; then
   fi
 elif [ -n "$PAIR_TOKEN" ]; then
   say "Mit DZPage verbinden"
-  if pair --token "$PAIR_TOKEN"; then
+  PAIR_RC=0
+  pair --token "$PAIR_TOKEN" || PAIR_RC=$?
+  # Link und Code nur, wenn der Code selbst nicht ging (Exit 1: abgelaufen,
+  # Netz). Wer an der Kontofrage verneint, abbricht oder nicht antwortet
+  # (Exit 4), hat entschieden; ebenso, wer vorher Strg+C drueckt (130).
+  if [ "$PAIR_RC" -eq 0 ]; then
     LINKED=1
-  elif [ "$TERMINAL" -eq 1 ] && [ "$LINK" -eq 1 ]; then
+  elif [ "$PAIR_RC" -eq 1 ] && [ "$TERMINAL" -eq 1 ] && [ "$LINK" -eq 1 ]; then
     note "Dann mit Link und Code:"
     pair && LINKED=1 || warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
-  else
+  elif [ "$PAIR_RC" -eq 1 ]; then
     warn "Nicht verbunden. Spaeter mit Link und Code: sudo dzpage-panel link"
+  else
+    warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
   fi
 elif [ "$LINK" -eq 1 ] && [ "$TERMINAL" -eq 1 ]; then
   say "Mit DZPage verbinden"
@@ -557,11 +701,21 @@ if [ "$LINKED" -eq 1 ] && { [ "$FIRST_INSTALL" -eq 1 ] || [ -n "$PAIR_TOKEN" ]; 
   say "Steam"
   note "Ein DayZ-Server braucht ein Steam-Konto, das DayZ besitzt (anonym verweigert Steam den Download)."
   printf '  Steam-Kontoname (leer lassen, um es spaeter mit "sudo dzpage-panel steam-login <konto>" zu tun): '
-  STEAM_ACCOUNT=""
-  read -r STEAM_ACCOUNT < /dev/tty || STEAM_ACCOUNT=""
+  # Mit Frist, damit eine Installation ohne Menschen davor trotzdem endet.
+  # Strg+C, Strg+D und keine Antwort ueberspringen nur diesen Schritt.
+  claim_terminal
+  STEAM_RC=0
+  trap 'printf "\n"' INT
+  STEAM_ACCOUNT=$(trap - INT; IFS= read -r -t "$ANSWER_SECONDS" line < /dev/tty && printf '%s' "$line") || STEAM_RC=$?
+  trap - INT
+  if [ "$STEAM_RC" -ne 0 ]; then
+    STEAM_ACCOUNT=""
+    printf '\n'
+    note "Uebersprungen. Spaeter: sudo dzpage-panel steam-login <konto>"
+  fi
   STEAM_ACCOUNT=$(printf '%s' "$STEAM_ACCOUNT" | tr -d '[:space:]')
   if [ -n "$STEAM_ACCOUNT" ]; then
-    "$CLI" steam-login "$STEAM_ACCOUNT" < /dev/tty \
+    interactive "$CLI" steam-login "$STEAM_ACCOUNT" < /dev/tty \
       || warn "Steam-Anmeldung nicht abgeschlossen. Spaeter: sudo dzpage-panel steam-login $STEAM_ACCOUNT"
   fi
 fi

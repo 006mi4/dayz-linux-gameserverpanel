@@ -185,7 +185,7 @@ function git(cwd, args) {
 export async function applyPanelUpdate(app, version, { exit = () => process.exit(0) } = {}) {
   const info = installation();
   if (!canSelfUpdate(info)) {
-    throw new Error("Dieses Panel wurde von Hand installiert — bitte selbst aktualisieren (siehe README).");
+    throw new Error("Dieses Panel wurde von Hand installiert. Bitte selbst aktualisieren (siehe README).");
   }
   if (!parseVersion(version)) throw new Error(`Keine gültige Fassung: ${version}`);
   if (compareVersions(version, PANEL_VERSION) <= 0) {
@@ -300,7 +300,7 @@ export async function announceSelfUpdateResult(app) {
     await recordEvent(app.db, {
       kind: "panel.update.failed",
       message: `Aktualisierung auf ${result.to} fehlgeschlagen${
-        result.rolledBack ? " — alter Stand wiederhergestellt" : ""
+        result.rolledBack ? ", alter Stand wiederhergestellt" : ""
       }: ${result.message}`,
     });
   }
@@ -373,7 +373,7 @@ export function createPanelUpdateWatcher(app, { fetchImpl = fetch } = {}) {
           // Ein laufender Vorgang hat Vorrang: Wer gerade DayZ herunterlaedt,
           // soll das nicht durch einen Neustart des Panels verlieren.
           if (app.jobs.current()?.running) {
-            log.info(`Panel ${latest} steht bereit, aber ein Vorgang läuft — später.`);
+            log.info(`Panel ${latest} steht bereit, aber ein Vorgang läuft; später.`);
           } else {
             log.info(`Panel ${latest} wird automatisch eingespielt.`);
             await applyPanelUpdate(app, latest);

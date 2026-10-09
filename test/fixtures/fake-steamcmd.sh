@@ -10,6 +10,9 @@
 #   guard*       fragt zusaetzlich nach dem Steam-Guard-Code (54321)
 #   ask*         stellt eine unbekannte Rueckfrage
 #   cachedslow*  wie cached*, aber die Installation dauert einige Sekunden
+#   nosub*       Installation: angemeldet, aber das Konto besitzt DayZ nicht
+#   dlfail*      Installation: Download bricht mit einem ERROR! ab
+#   nolib*       Installation: SteamCMD startet nicht, eine 32-Bit-Bibliothek fehlt
 #
 # Mit Argumenten (+login KONTO +quit) verhaelt es sich wie die Pruefung des
 # gemerkten Sitzungstokens: "cached*" ist angemeldet, alles andere fragt nach
@@ -62,6 +65,19 @@ if [ "${1:-}" = '+force_install_dir' ] && [ "${3:-}" = '+login' ]; then
       cp "$(dirname "$0")/appmanifest_223350.acf" "$dir/steamapps/appmanifest_223350.acf"
       printf ' Update state (0x61) downloading, progress: 50.00 (2048 / 4096)\n'
       printf "Success! App '223350' fully installed.\n"
+      ;;
+    nosub*)
+      printf "Logging in user '%s' [U:1:0] to Steam Public...OK\n" "$account"
+      printf "ERROR! Failed to install app '223350' (No subscription)\n"
+      ;;
+    dlfail*)
+      printf "Logging in user '%s' [U:1:0] to Steam Public...OK\n" "$account"
+      printf ' Update state (0x61) downloading, progress: 12.00 (512 / 4096)\n'
+      printf "ERROR! Failed to install app '223350' (Disk write failure)\n"
+      ;;
+    nolib*)
+      printf '%s: error while loading shared libraries: libstdc++.so.6: cannot open shared object file: No such file or directory\n' "linux32/steamcmd"
+      exit 127
       ;;
     *)
       printf 'Cached credentials not found.\n\n'
