@@ -63,7 +63,8 @@ as_service() { setpriv --reuid="$SERVICE_USER" --regid="$SERVICE_USER" --clear-g
 # Warum ueber /etc und "mv -T", steht bei install.json.
 replace_root_file() {
   local dest=$1 tmp
-  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX")
+  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX") \
+    || die "$dest liess sich nicht schreiben (keine Nebendatei in $(dirname "$CONFIG_DIR"))."
   if cat > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$dest"; then
     return 0
   fi
@@ -477,8 +478,9 @@ fi
 say "Lokale Oberflaeche (optional)"
 # Als Dienstbenutzer gelesen: Bei der Selbstaktualisierung geht diese Ausgabe
 # in self-update.log, und root braechte ueber einen Verweis anstelle der Datei
-# den Anfang jeder Datei dorthin, die nur root lesen darf.
-HTTPS_DOMAIN=$(as_service head -c 256 "$CONFIG_DIR/https-domain" 2>/dev/null | head -n 1 || true)
+# den Anfang jeder Datei dorthin, die nur root lesen darf. timeout, weil eine
+# FIFO an dieser Stelle das Lesen sonst ewig blockiert.
+HTTPS_DOMAIN=$(as_service timeout 5 head -c 256 "$CONFIG_DIR/https-domain" 2>/dev/null | head -n 1 || true)
 if [ -n "$HTTPS_DOMAIN" ]; then
   note "https://$HTTPS_DOMAIN"
 else

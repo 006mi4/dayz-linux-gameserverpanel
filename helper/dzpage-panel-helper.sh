@@ -88,21 +88,31 @@ cmd_prepare() {
   [ -f "$DROPIN_ROOT/$UNIT_PREFIX@.service" ] || die "Vorlage $UNIT_PREFIX@.service fehlt"
 
   id -u "$user" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
-  as_panel "$user" mkdir -p "$dir/game" "$dir/profiles/battleye"
 
   # Die Rechte nur richten, wenn sie nicht schon stimmen: Ein chown -R ueber
   # sechs Gigabyte Spieldateien kostet Zeit, und prepare laeuft inzwischen vor
   # jedem Start — damit ein Server, dessen Einrichtung einmal abgeraeumt wurde,
   # von selbst wieder hochkommt.
+  #
+  # Ein vorhandenes Verzeichnis zuerst, dann erst anlegen: Wer eine Sicherung
+  # mit "sudo cp -r" zurueckspielt, hat ein Verzeichnis, das root gehoert, und
+  # darin kann der Panel-Benutzer nichts anlegen. Danach noch einmal fuer ein
+  # Verzeichnis, das gerade erst entstanden ist. umask 002, damit fehlende
+  # Unterverzeichnisse dieselben Gruppenrechte bekommen wie nach fix_permissions.
+  if [ -d "$dir" ] && [ "$(stat -c '%U:%G' "$dir")" != "$PANEL_USER:$user" ]; then
+    fix_permissions "$id" "$dir"
+  fi
+  as_panel "$user" sh -c 'umask 002 && exec mkdir -p "$@"' sh "$dir/game" "$dir/profiles/battleye"
   if [ "$(stat -c '%U:%G' "$dir")" != "$PANEL_USER:$user" ]; then
     fix_permissions "$id" "$dir"
   fi
 
   # Durchgangsrecht, aber kein Leserecht: der Serverbenutzer kommt in sein
   # eigenes Verzeichnis, sieht aber weder die Nachbarn noch die Panel-Datenbank.
-  # $DATA_DIR liegt in /var/lib und kann nicht vertauscht werden, servers schon.
+  # $DATA_DIR liegt in /var/lib und kann nicht vertauscht werden, servers schon;
+  # deshalb dort nur der Panel-Benutzer, und nur wenn es noetig ist.
   chmod 0751 "$DATA_DIR"
-  as_panel "$user" chmod 0751 "$SERVERS_DIR"
+  [ "$(stat -c '%a' "$SERVERS_DIR")" = 751 ] || as_panel "$user" chmod 0751 "$SERVERS_DIR"
 
   dropin=$DROPIN_ROOT/$unit.d
   mkdir -p "$dropin"
@@ -257,6 +267,9 @@ cmd_self_update() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "muss als root laufen"
+# find kehrt am Ende in das Startverzeichnis zurueck; laeuft es als
+# Panel-Benutzer und der Helfer wurde aus /root aufgerufen, scheitert genau das.
+cd /
 
 dispatch() {
   local action=${1:-}

@@ -42,7 +42,7 @@ die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 # Dateisystem nur den Eintrag (wie install.json in install.sh).
 replace_root_file() {
   local dest=$1 tmp
-  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX")
+  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX") || return 1
   if cat > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$dest"; then
     return 0
   fi
