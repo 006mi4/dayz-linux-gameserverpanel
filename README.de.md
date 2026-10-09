@@ -280,6 +280,14 @@ Danach gibt es Starten, Stoppen, Neustarten, Autostart, den Laufzeitwechsel und
 „Bei DZPage anmelden". Letzteres trägt den Server mitsamt RCon-Zugang in dein
 DZPage-Konto ein, ohne dass du dort etwas abtippst.
 
+Als RCon-Adresse nimmt DZPage die Adresse, von der die Anmeldung kommt, und
+BattlEye-RCon spricht nur IPv4. Das Panel schickt diese eine Anfrage deshalb
+über IPv4, auch wenn die Maschine sonst IPv6 bevorzugt. Hat die Maschine kein
+IPv4, landet der Server trotzdem in deinem Konto, RCon von dzpage.com aus bleibt
+dann aber aus; das Ereignisprotokoll im Panel sagt es. Server, die eine ältere
+Fassung angemeldet hat, meldet das Panel nach dem Update einmal von selbst neu
+an.
+
 Im systemd-Weg läuft **jeder Server unter einem eigenen Benutzer**
 (`dzsrv_<kennung>`), in seinem eigenen Verzeichnis, mit eigenen Speicher- und
 CPU-Grenzen. Er kann weder die Konfiguration des Panels lesen noch die Dateien

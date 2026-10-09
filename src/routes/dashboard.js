@@ -35,7 +35,7 @@ export async function root(rc) {
 /** Farbe des Punkts vor einem Ereignis: nur Fehler stechen heraus. */
 function eventDot(kind) {
   if (/fail|error/i.test(kind)) return "bad";
-  if (/^update\./.test(kind)) return "warn";
+  if (/^update\.|\.ipv6$/.test(kind)) return "warn";
   return "off";
 }
 

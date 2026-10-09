@@ -2,6 +2,7 @@ import { DzpageClient } from "./client.js";
 import { getSetting, KEYS, setSetting } from "../store/settings.js";
 import { countServers } from "../store/servers.js";
 import { clearKeyRejected, isRejection, markKeyRejected } from "./keystate.js";
+import { reregisterServersOnce } from "./servers.js";
 import { log } from "../log.js";
 
 /**
@@ -53,6 +54,10 @@ export function createHeartbeat(app) {
         // aendern sich ohne Anlass, und ein abgestuerzter Server meldet sich
         // nicht von selbst.
         await app.reporter?.report({ force: true });
+        // Einmal nach dem Update: angemeldete Server ueber IPv4 neu anmelden,
+        // damit DZPage fuer RCon die richtige Adresse hat. Nicht abwarten: Bei
+        // langsamer Leitung soll der Takt des Herzschlags nicht daran haengen.
+        reregisterServersOnce(app).catch((err) => log.warn(`Neuanmeldung der Server: ${err.message}`));
       } else if (result.code === "unknown_panel") {
         // DZPage kennt diese Panel-ID nicht mehr — neu anmelden statt aufgeben.
         log.warn("DZPage kennt dieses Panel nicht mehr, melde neu an.");

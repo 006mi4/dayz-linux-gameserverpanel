@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { arch, release, type as osType } from "node:os";
 import { PANEL_VERSION } from "../version.js";
 
@@ -19,11 +21,77 @@ export function platformLabel() {
   return `${osType()} ${release()} (${arch()})`.slice(0, 80);
 }
 
+/**
+ * fetch, aber nur ueber IPv4, mit genau dem, was request() von einer Antwort
+ * braucht (ok, status, json). Global fetch kennt keine Adressfamilie, und
+ * prozessweit umstellen (ipv4first, autoSelectFamily aus) wuerde Long-Poll und
+ * Herzschlag auf Maschinen ohne IPv4 brechen.
+ *
+ * Ein Fehler traegt `connected`: ob die Verbindung schon stand. Nur wenn
+ * nicht, hat DZPage die Anfrage sicher nie gesehen. `lookup` gibt es nur fuer
+ * die Tests (eigene Namensaufloesung, wie bei http.request).
+ */
+export function fetchIpv4(url, { method = "GET", headers = {}, body, signal, lookup } = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const send = target.protocol === "https:" ? httpsRequest : httpRequest;
+    let connected = false;
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      // Wie fetch: Ein abgelaufenes Zeitlimit heisst TimeoutError.
+      const reason = signal?.aborted ? signal.reason : err;
+      const error = new Error(reason?.message || String(reason));
+      error.name = reason?.name || "Error";
+      error.code = err?.code;
+      error.connected = connected;
+      reject(error);
+    };
+
+    const req = send(
+      target,
+      {
+        method,
+        headers: body === undefined ? headers : { ...headers, "content-length": Buffer.byteLength(body) },
+        family: 4,
+        // Eine eigene Verbindung, die danach schliesst: Die Anmeldung ist
+        // selten, und so bleibt nichts offen liegen.
+        agent: false,
+        signal,
+        ...(lookup ? { lookup } : {}),
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("error", fail);
+        res.on("close", () => {
+          if (!res.complete) fail(new Error("Verbindung während der Antwort abgebrochen"));
+        });
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            json: async () => JSON.parse(text),
+          });
+        });
+      },
+    );
+    req.on("socket", (socket) => socket.once("connect", () => (connected = true)));
+    req.on("error", fail);
+    req.end(body);
+  });
+}
+
 export class DzpageClient {
-  constructor({ baseUrl, key, fetchImpl = fetch }) {
+  constructor({ baseUrl, key, fetchImpl = fetch, ipv4FetchImpl = fetchIpv4 }) {
     this.baseUrl = String(baseUrl || "").replace(/\/+$/, "");
     this.key = key || null;
     this.fetchImpl = fetchImpl;
+    this.ipv4FetchImpl = ipv4FetchImpl;
   }
 
   get hasKey() {
@@ -34,14 +102,15 @@ export class DzpageClient {
    * Eine Anfrage an die Panel-API. Der Long-Poll braucht eine laengere Frist
    * als der Rest — deshalb ist sie hier einstellbar statt fest.
    */
-  async request(method, path, body = null, { timeoutMs = TIMEOUT_MS, signal, anonymous = false } = {}) {
+  async request(method, path, body = null, { timeoutMs = TIMEOUT_MS, signal, anonymous = false, ipv4 = false } = {}) {
     // Ohne Schluessel geht nur die Kopplung: Sie ist genau der Weg, auf dem
     // ein Panel seinen Schluessel erst bekommt.
     if (!anonymous && !this.hasKey) return { ok: false, code: "missing_key" };
 
+    const send = ipv4 ? this.ipv4FetchImpl : this.fetchImpl;
     let response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      response = await send(`${this.baseUrl}${path}`, {
         method,
         headers: {
           ...(anonymous ? {} : { authorization: `Bearer ${this.key}` }),
@@ -54,7 +123,9 @@ export class DzpageClient {
       });
     } catch (err) {
       // Zeitueberschreitung und Namensauflösung landen beide hier.
-      return { ok: false, code: "network", message: err.name === "TimeoutError" ? "Zeitüberschreitung" : err.message };
+      const message = err.name === "TimeoutError" ? "Zeitüberschreitung" : err.message;
+      if (ipv4) return { ok: false, code: "network", message, connected: err.connected === true };
+      return { ok: false, code: "network", message };
     }
 
     let payload = null;
@@ -91,5 +162,23 @@ export class DzpageClient {
 
   heartbeat({ panelId, serverCount = 0, version = PANEL_VERSION }) {
     return this.post("/api/panel/v1/heartbeat", { panelId, serverCount, version });
+  }
+
+  /**
+   * Server anmelden. DZPage nimmt die Quelladresse dieser Anfrage als
+   * RCon-Adresse, und BattlEye-RCon spricht nur IPv4: Deshalb geht genau diese
+   * Anfrage ueber IPv4, auch wenn die Maschine sonst IPv6 bevorzugt.
+   *
+   * Kommt ueber IPv4 gar keine Verbindung zustande (Maschine ohne IPv4), wie
+   * jeder andere Aufruf. DZPage legt den Server dann mit `warning:
+   * "ipv6_source"` an, und RCon bleibt aus. Stand die Verbindung schon, gibt es
+   * keinen zweiten Versuch: Die Anmeldung kann angekommen sein, und eine zweite
+   * ueber IPv6 wuerde die richtige Adresse wieder ueberschreiben.
+   */
+  async registerServer(body) {
+    const viaIpv4 = await this.request("POST", "/api/panel/v1/servers", body, { ipv4: true });
+    if (viaIpv4.ok || viaIpv4.code !== "network" || viaIpv4.connected) return { ...viaIpv4, via: "ipv4" };
+    const fallback = await this.post("/api/panel/v1/servers", body);
+    return { ...fallback, via: "fallback", ipv4Error: viaIpv4.message };
   }
 }

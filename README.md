@@ -290,6 +290,13 @@ After that you get start, stop, restart, autostart, the runtime switch and
 **“Register with DZPage”**. The last one puts the server, including its RCon
 access, into your DZPage account without you typing anything there.
 
+DZPage takes the address the registration comes from as the RCon address, and
+BattlEye RCon only speaks IPv4. So the panel sends this one request over IPv4,
+even on machines that otherwise prefer IPv6. On a machine without IPv4 the
+server still lands in your account, but RCon from dzpage.com stays off; the
+panel's event log says so. Servers registered by an older version are
+registered once more on their own after the update.
+
 In the systemd install **every server runs as its own user** (`dzsrv_<id>`), in
 its own directory, with its own memory and CPU limits. It can read neither the
 panel’s configuration nor its neighbours’ files.

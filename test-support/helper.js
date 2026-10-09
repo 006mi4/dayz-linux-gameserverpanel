@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
 
 /**
  * Hilfen fuer die Tests. Die Umgebungsvariablen muessen gesetzt sein, bevor
@@ -114,11 +115,21 @@ export class Client {
  * Standhalter fuer die Panel-API von DZPage. Antwortet wie das Original,
  * inklusive der Fehlercodes aus src/lib/panel/api.ts.
  */
-export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef", account = "TestKonto" } = {}) {
+export async function startDzpageStub({
+  key = "dzp_panel_testkey0123456789abcdef",
+  account = "TestKonto",
+  host = "127.0.0.1",
+  urlHost = host.includes(":") ? `[${host}]` : host,
+  ipv6Only = false,
+} = {}) {
   const calls = {
     register: [],
     heartbeat: [],
     servers: [],
+    /** Quelladresse jeder Server-Anmeldung, in derselben Reihenfolge wie servers. */
+    serverSources: [],
+    /** Quelladresse jedes Herzschlags. */
+    heartbeatSources: [],
     unregister: [],
     results: [],
     progress: [],
@@ -141,11 +152,16 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
    * forbiddenPage: ein Proxy vor DZPage sperrt mit 403, als "html" oder als "json" ohne Code.
    * failHeartbeat: der Herzschlag scheitert mit 503, bevor ein Schluessel geprueft wird.
    * revokeDelayMs: so lange braucht die Antwort auf einen Widerruf.
+   * failServers: die naechsten n Server-Anmeldungen scheitern mit 503.
+   * dropServers: die naechsten n Server-Anmeldungen kommen an, die Verbindung
+   *   bricht aber ab, bevor die Antwort da ist.
    */
   const state = {
     revoked: false,
     unknownPanel: false,
     failRegister: 0,
+    failServers: 0,
+    dropServers: 0,
     noReport: false,
     noRevoke: false,
     forbiddenPage: null,
@@ -271,6 +287,7 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
       }
       if (path === "/api/panel/v1/heartbeat") {
         calls.heartbeat.push(payload);
+        calls.heartbeatSources.push(req.socket.remoteAddress);
         if (state.unknownPanel) return send(404, { ok: false, error: "unknown_panel" });
         return send(200, { ok: true, heartbeatSeconds: 60 });
       }
@@ -279,8 +296,25 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
           calls.unregister.push(payload);
           return send(200, { ok: true, removed: 1 });
         }
+        if (state.failServers > 0) {
+          state.failServers -= 1;
+          return send(503, { ok: false, error: "unavailable" });
+        }
+        const source = req.socket.remoteAddress;
         calls.servers.push(payload);
-        return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7" });
+        calls.serverSources.push(source);
+        if (state.dropServers > 0) {
+          state.dropServers -= 1;
+          req.socket.destroy();
+          return;
+        }
+        // Wie dzpage.com ab 1.161.0: Die Quelladresse ist die RCon-Adresse.
+        // IPv6 wird angelegt, RCon bleibt aber aus. Ueber IPv4 steht hier eine
+        // feste oeffentliche Adresse, weil der Test von 127.0.0.1 kommt.
+        if (isIP(source) === 6 && !source.startsWith("::ffff:")) {
+          return send(200, { ok: true, serverId: "rcon123456", host: source, rcon: false, warning: "ipv6_source" });
+        }
+        return send(200, { ok: true, serverId: "rcon123456", host: "203.0.113.7", rcon: true });
       }
       if (path === "/api/panel/v1/report") {
         if (state.noReport) {
@@ -309,9 +343,13 @@ export async function startDzpageStub({ key = "dzp_panel_testkey0123456789abcdef
     });
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ port: 0, host, ipv6Only }, resolve);
+  });
   return {
-    url: `http://127.0.0.1:${server.address().port}`,
+    url: `http://${urlHost}:${server.address().port}`,
+    port: server.address().port,
     key,
     calls,
     state,
