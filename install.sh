@@ -243,6 +243,38 @@ fi
 # Schreibrecht im Verzeichnis selbst. Die Datei bleibt 0600.
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$CONFIG_DIR"
 #
+# Dasselbe fuer die beiden Dateien, die das Panel dort selbst schreibt. Wer
+# panel.json vor der Installation von Hand anlegt (Port setzen) oder eine
+# Sicherung mit "sudo mv" zurueckspielt, hat eine Datei, die root gehoert. Mit
+# 0600 kann der Dienst sie nicht lesen, startet nicht, und unten heisst es nur
+# "nicht hochgekommen". install.json gehoert dagegen absichtlich root.
+#
+# Node statt chown und chmod: Diese Zeilen laufen auch bei jeder
+# Selbstaktualisierung als root, waehrend das Panel noch laeuft, und das
+# Verzeichnis gehoert dem Dienstbenutzer. Ein uebernommenes Panel koennte die
+# Datei gegen einen Verweis auf /etc/passwd tauschen; chmod folgt Verweisen,
+# auch noch zwischen Pruefung und Aufruf. Ein einziger Deskriptor mit
+# O_NOFOLLOW schliesst das aus, der Linkzaehler einen harten Link. O_NONBLOCK,
+# damit eine untergeschobene FIFO das Oeffnen nicht ewig blockiert.
+for name in panel.json setup-code; do
+  "$NODE_BIN" -e '
+    const fs = require("node:fs");
+    const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+    const [file, uid, gid] = process.argv.slice(1);
+    let fd;
+    try {
+      fd = fs.openSync(file, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    } catch (err) {
+      process.exit(err.code === "ENOENT" ? 0 : 1);
+    }
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1) process.exit(1);
+    fs.fchownSync(fd, Number(uid), Number(gid));
+    fs.fchmodSync(fd, 0o600);
+  ' "$CONFIG_DIR/$name" "$(id -u "$SERVICE_USER")" "$(id -g "$SERVICE_USER")" \
+    || warn "$CONFIG_DIR/$name bleibt, wie sie ist (Verweis, harter Link oder keine gewoehnliche Datei). Der Dienst braucht dort eine Datei, die ihm gehoert, mit 0600."
+done
+#
 # 0751 und nicht 0750: Jeder Spielserver laeuft unter einem eigenen Benutzer und
 # muss durch diese beiden Verzeichnisse hindurch in sein eigenes kommen —
 # durchgehen darf er, hineinsehen nicht. Genau das setzt auch der Helfer beim
