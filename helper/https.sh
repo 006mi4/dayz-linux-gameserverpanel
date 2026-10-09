@@ -4,7 +4,7 @@
 #
 #   https.sh enable <domain>   Caddy einrichten, Zertifikat von Let's Encrypt
 #   https.sh disable           wieder abbauen (Caddy selbst bleibt installiert)
-#   https.sh status
+#   https.sh status            Adresse oder "aus" (in der Sprache der Installation)
 #
 # Aufruf als root, ueber install.sh --domain oder "sudo dzpage-panel https".
 #
@@ -27,11 +27,28 @@ MARK="# Eingerichtet von dzpage-panel"
 DROPIN_DIR=/etc/systemd/system/dzpage-panel.service.d
 DROPIN=$DROPIN_DIR/https.conf
 UFW_COMMENT="dzpage-panel https"
+APP_DIR=/usr/lib/dzpage-panel
+
+# Sprache wie beim Aufrufer: install.sh und dzpage-panel geben sie in
+# DZPAGE_PANEL_LANG weiter.
+if [ -r "$APP_DIR/i18n.sh" ]; then
+  # shellcheck source=helper/i18n.sh
+  . "$APP_DIR/i18n.sh"
+  i18n_init "$APP_DIR/src/i18n/terminal"
+else
+  t() { printf '%s' "$1"; }
+fi
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
-warn() { printf '  \033[33mAchtung:\033[0m %s\n' "$*"; }
-die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
+warn() { printf '  \033[33m%s\033[0m %s\n' "$(t common.warning)" "$*"; }
+die() { printf '\n\033[31m%s\033[0m %s\n' "$(t common.error)" "$*" >&2; exit 1; }
+
+usage() {
+  printf '  %-26s %s\n' "https.sh enable <domain>" "$(t https.help.enable)"
+  printf '  %-26s %s\n' "https.sh disable" "$(t https.help.disable)"
+  printf '  %-26s %s\n' "https.sh status" "$(t https.help.status)"
+}
 
 # apt-get, das auf eine belegte Paketverwaltung wartet, statt sofort mit 100
 # abzubrechen (dieselbe Funktion wie in install.sh, dort steht das Warum).
@@ -53,16 +70,16 @@ apt_get() {
       else
         printf '%s\n' "$out" >&2
       fi
-      [ "$locked" -eq 0 ] || warn "Die Paketverwaltung war $APT_WAIT_SECONDS Sekunden lang belegt. Spaeter erneut versuchen." >&2
+      [ "$locked" -eq 0 ] || warn "$(t common.apt_locked seconds="$APT_WAIT_SECONDS")" >&2
       return "$rc"
     fi
-    [ "$waited" -eq 1 ] || note "Die Paketverwaltung ist gerade belegt (meist automatische Updates nach dem Start). Warte, bis sie frei ist ..." >&2
+    [ "$waited" -eq 1 ] || note "$(t common.apt_busy)" >&2
     waited=1
     sleep 10
   done
 }
 
-[ "$(id -u)" -eq 0 ] || die "Bitte als root ausfuehren (sudo)."
+[ "$(id -u)" -eq 0 ] || die "$(t common.need_root)"
 
 # Schreibt stdin als Datei, die root gehoert, nach $CONFIG_DIR. Das Verzeichnis
 # gehoert dem Dienst, und "printf >" und chmod folgten einem Verweis, den ein
@@ -100,12 +117,12 @@ foreign_listeners() {
 
 install_caddy() {
   if command -v caddy >/dev/null 2>&1; then
-    note "Caddy ist schon da ($(caddy version 2>/dev/null | cut -d' ' -f1))"
+    note "$(t https.caddy_present version="$(caddy version 2>/dev/null | cut -d' ' -f1)")"
     return
   fi
   command -v apt-get >/dev/null 2>&1 \
-    || die "Caddy fehlt, und ohne apt kann ich es nicht installieren. Anleitung: https://caddyserver.com/docs/install"
-  note "installiere Caddy aus dem offiziellen Paketarchiv"
+    || die "$(t https.caddy_no_apt)"
+  note "$(t https.caddy_installing)"
   export DEBIAN_FRONTEND=noninteractive
   apt_get update -qq
   apt_get install -y -qq gnupg curl ca-certificates >/dev/null
@@ -117,7 +134,7 @@ install_caddy() {
   chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
   apt_get update -qq
   apt_get install -y -qq caddy >/dev/null
-  note "$(caddy version 2>/dev/null | cut -d' ' -f1) installiert"
+  note "$(t https.caddy_installed version="$(caddy version 2>/dev/null | cut -d' ' -f1)")"
 }
 
 # Die Paketfassung der Caddyfile liefert nur die Willkommensseite auf :80 aus.
@@ -162,7 +179,7 @@ firewall_web() {
         ufw --force delete allow "$port/tcp" >/dev/null 2>&1 || true
       fi
     done
-    note "ufw: 80/tcp und 443/tcp $([ "$action" = open ] && echo freigegeben || echo entfernt)"
+    if [ "$action" = open ]; then note "$(t https.ufw_open)"; else note "$(t https.ufw_closed)"; fi
   elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
     for service in http https; do
       if [ "$action" = open ]; then
@@ -173,7 +190,7 @@ firewall_web() {
         firewall-cmd --quiet --remove-service="$service" >/dev/null 2>&1 || true
       fi
     done
-    note "firewalld: http und https $([ "$action" = open ] && echo freigegeben || echo entfernt)"
+    if [ "$action" = open ]; then note "$(t https.firewalld_open)"; else note "$(t https.firewalld_closed)"; fi
   fi
 }
 
@@ -202,15 +219,15 @@ check_dns() {
   # Fall; unter set -e und pipefail beendete getent sonst das ganze Skript.
   resolved=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u | xargs || true)
   if [ -z "$resolved" ]; then
-    warn "$domain zeigt noch auf keine Adresse. Erst beim DNS-Anbieter einen A-Eintrag auf diese Maschine setzen; Caddy versucht es so lange weiter."
+    warn "$(t https.dns_none domain="$domain")"
     return
   fi
   locals=$(hostname -I 2>/dev/null | xargs || true)
   for ip in $resolved; do
-    case " $locals " in *" $ip "*) note "$domain zeigt auf $ip, das ist diese Maschine"; return ;; esac
+    case " $locals " in *" $ip "*) note "$(t https.dns_here domain="$domain" ip="$ip")"; return ;; esac
   done
-  note "$domain zeigt auf $resolved, diese Maschine hat ${locals:-keine erkennbare Adresse}."
-  note "Hinter NAT ist das normal. Sonst bekommt Caddy kein Zertifikat, bis der DNS-Eintrag stimmt."
+  note "$(t https.dns_elsewhere domain="$domain" resolved="$resolved" locals="${locals:-$(t https.no_address)}")"
+  note "$(t https.dns_nat)"
 }
 
 wait_for_https() {
@@ -230,15 +247,15 @@ wait_for_https() {
 cmd_enable() {
   local domain=${1:-}
   domain=$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')
-  valid_domain "$domain" || die "\"$1\" ist kein gueltiger Domainname (zum Beispiel panel.example.com)."
-  systemctl cat dzpage-panel.service >/dev/null 2>&1 || die "Das Panel ist hier nicht installiert."
+  valid_domain "$domain" || die "$(t https.invalid_domain domain="$1")"
+  systemctl cat dzpage-panel.service >/dev/null 2>&1 || die "$(t https.not_installed)"
 
-  say "HTTPS fuer $domain"
+  say "$(t https.title domain="$domain")"
   local foreign
   foreign=$(foreign_listeners)
   if [ -n "$foreign" ]; then
     printf '%s\n' "$foreign" | sed 's/^/    /'
-    die "Port 80 oder 443 ist schon von einem anderen Webserver belegt. Den kann ich nicht ersetzen. Stattdessen dort einen Reverse-Proxy auf http://127.0.0.1:$(panel_port) einrichten und in der Panel-Unit DZPAGE_PANEL_TRUST_PROXY=1 setzen (README, Abschnitt \"Von aussen erreichbar machen\")."
+    die "$(t https.port_taken port="$(panel_port)")"
   fi
 
   # Mit Proxy glaubt das Panel den Kopfzeilen X-Forwarded-*. Das ist nur
@@ -247,7 +264,7 @@ cmd_enable() {
   bind=$(sed -n 's/^  "bind": *"\([^"]*\)".*/\1/p' "$CONFIG_DIR/panel.json" 2>/dev/null | head -1 || true)
   case "${bind:-127.0.0.1}" in
     127.0.0.1|::1|localhost) ;;
-    *) die "Das Panel lauscht auf $bind. Hinter Caddy muss es auf 127.0.0.1 stehen (\"bind\" in $CONFIG_DIR/panel.json), sonst koennte jeder die Proxy-Angaben faelschen." ;;
+    *) die "$(t https.bind bind="$bind" file="$CONFIG_DIR/panel.json")" ;;
   esac
 
   check_dns "$domain"
@@ -271,7 +288,7 @@ EOF
     caddy validate --config "$candidate" --adapter caddyfile 2>&1 | tail -5 | sed 's/^/    /' || true
     rm -f "$candidate"
     if [ -n "$previous_site" ]; then printf '%s\n' "$previous_site" > "$SITE"; else rm -f "$SITE"; fi
-    die "Caddy lehnt die Konfiguration ab (siehe oben). Nichts geaendert."
+    die "$(t https.caddy_rejects)"
   fi
   chmod 0644 "$candidate"
   mv "$candidate" "$CADDYFILE"
@@ -279,22 +296,22 @@ EOF
   # Ab hier ist etwas eingerichtet: Den Merker zuerst schreiben, damit
   # "https disable" und die Deinstallation aufraeumen, auch wenn ein spaeterer
   # Schritt scheitert.
-  printf '%s\n' "$domain" | replace_root_file "$DOMAIN_FILE" || die "$DOMAIN_FILE liess sich nicht schreiben."
+  printf '%s\n' "$domain" | replace_root_file "$DOMAIN_FILE" || die "$(t https.write_failed file="$DOMAIN_FILE")"
   firewall_web open
   panel_proxy_mode 1
   systemctl enable --quiet caddy
   systemctl reload-or-restart caddy
 
-  note "warte auf das Zertifikat (bis zu 90 Sekunden)"
+  note "$(t https.waiting)"
   if wait_for_https "$domain"; then
-    note "Oberflaeche: https://$domain"
+    note "$(t https.ready domain="$domain")"
   else
-    warn "https://$domain antwortet noch nicht. Haeufigste Gruende: der DNS-Eintrag zeigt noch nicht hierher, oder eine Firewall beim Hoster sperrt 80/443. Caddy versucht es selbst weiter; Protokoll: journalctl -u caddy -e"
+    warn "$(t https.not_yet domain="$domain")"
   fi
 }
 
 cmd_disable() {
-  say "HTTPS abbauen"
+  say "$(t https.disable_title)"
   local domain=""
   [ -f "$DOMAIN_FILE" ] && domain=$(cat "$DOMAIN_FILE")
   rm -f "$SITE"
@@ -305,14 +322,15 @@ cmd_disable() {
   firewall_web close
   panel_proxy_mode 0
   rm -f "$DOMAIN_FILE"
-  note "${domain:-HTTPS} abgebaut. Die Oberflaeche ist wieder nur ueber 127.0.0.1 erreichbar."
+  note "$(t https.disabled domain="${domain:-HTTPS}")"
 }
 
 cmd_status() {
   if [ -f "$DOMAIN_FILE" ]; then
     echo "https://$(cat "$DOMAIN_FILE")"
   else
-    echo "aus"
+    t https.status_off
+    echo
   fi
 }
 
@@ -320,5 +338,5 @@ case "${1:-}" in
   enable) shift; cmd_enable "$@" ;;
   disable) cmd_disable ;;
   status) cmd_status ;;
-  *) sed -n '2,8p' "$0"; exit 2 ;;
+  *) usage; exit 2 ;;
 esac

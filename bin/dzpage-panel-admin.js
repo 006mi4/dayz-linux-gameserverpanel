@@ -23,6 +23,7 @@ import {
   waitForApproval,
 } from "../src/dzpage/pairing.js";
 import { clearKeyRejected, isRejection, markKeyRejected, readKeyRejection } from "../src/dzpage/keystate.js";
+import { isYes, terminalLocale, terminalTranslator } from "../src/i18n/terminal.js";
 
 /**
  * Verwaltung von der Kommandozeile, fuer das, was ohne Browser gehen muss.
@@ -41,7 +42,12 @@ import { clearKeyRejected, isRejection, markKeyRejected, readKeyRejection } from
  * und DZPage nimmt den gespeicherten Schluessel noch an), 4 an der Kontofrage
  * verneint, abgebrochen oder unbeantwortet (auf der Maschine aendert sich
  * nichts; install.sh versucht es dann nicht noch einmal mit Link und Code).
+ *
+ * Ausgaben in der Sprache der Installation (src/i18n/terminal); dzpage-panel
+ * gibt sie in DZPAGE_PANEL_LANG mit.
  */
+
+const t = terminalTranslator(terminalLocale());
 
 const EXIT_DECLINED = 4;
 
@@ -57,17 +63,17 @@ function say(line = "") {
 /* ------------------------------------------------------------ Passwort */
 
 async function resetPassword(config, wanted) {
-  if (!config.database) fail("Das Panel ist noch nicht eingerichtet: Es gibt noch keine Datenbank.");
+  if (!config.database) fail(t("admin.no_database"));
   const db = await openDatabase(config.database);
   try {
     let user;
     if (wanted) {
       user = await findUserByUsername(db, wanted);
-      if (!user) fail(`Es gibt keinen Benutzer "${wanted}".`);
+      if (!user) fail(t("admin.no_such_user", { user: wanted }));
     } else {
       const users = await db.all("SELECT id, username FROM users ORDER BY created_at ASC", []);
-      if (!users.length) fail("Es gibt noch keinen Administrator. Der Assistent legt ihn an (sudo dzpage-panel setup-code).");
-      if (users.length > 1) fail(`Mehrere Benutzer vorhanden, bitte einen nennen: ${users.map((u) => u.username).join(", ")}`);
+      if (!users.length) fail(t("admin.no_admin"));
+      if (users.length > 1) fail(t("admin.many_users", { users: users.map((u) => u.username).join(", ") }));
       user = users[0];
     }
 
@@ -79,8 +85,8 @@ async function resetPassword(config, wanted) {
       source: "cli",
       message: `Passwort von ${user.username} auf der Kommandozeile neu gesetzt`,
     });
-    say(`Neues Passwort für ${user.username}: ${password}`);
-    say("Alle Sitzungen sind abgemeldet. Nach dem Anmelden unter Konto ein eigenes setzen.");
+    say(t("admin.new_password", { user: user.username, password }));
+    say(t("admin.sessions_ended"));
   } finally {
     await db.close().catch(() => undefined);
   }
@@ -89,17 +95,18 @@ async function resetPassword(config, wanted) {
 /* -------------------------------------------------------------- Kopplung */
 
 const PAIR_ERRORS = {
-  invalid_token: "Dieser Kopplungscode ist ungültig. Auf dzpage.com einen neuen Befehl holen.",
-  expired_token: "Dieser Kopplungscode ist abgelaufen oder schon benutzt. Auf dzpage.com einen neuen Befehl holen.",
-  denied: "Die Kopplung wurde auf dzpage.com abgelehnt.",
-  expired: "Der Code ist abgelaufen, bevor er bestätigt wurde. Neu starten: sudo dzpage-panel link",
-  rate_limited: "DZPage bremst gerade zu viele Kopplungsversuche. In ein paar Minuten erneut versuchen.",
-  network: "DZPage ist nicht erreichbar. Netzwerk prüfen und erneut versuchen: sudo dzpage-panel link",
-  limit_reached: "Dein DZPage-Konto hat schon die höchste Zahl verbundener Server. Auf dzpage.com einen entfernen.",
+  invalid_token: "admin.pair.invalid_token",
+  expired_token: "admin.pair.expired_token",
+  denied: "admin.pair.denied",
+  expired: "admin.pair.expired",
+  rate_limited: "admin.pair.rate_limited",
+  network: "admin.pair.network",
+  limit_reached: "admin.pair.limit_reached",
 };
 
 function pairError(result) {
-  return PAIR_ERRORS[result.code] || `Kopplung fehlgeschlagen (${result.code}${result.status ? `, ${result.status}` : ""}).`;
+  if (Object.hasOwn(PAIR_ERRORS, result.code)) return t(PAIR_ERRORS[result.code]);
+  return t("admin.pair.failed", { code: `${result.code}${result.status ? `, ${result.status}` : ""}` });
 }
 
 /** Was von DZPage kommt, geht ohne Steuerzeichen ins Terminal. */
@@ -233,21 +240,21 @@ function askTerminal(question) {
  */
 async function confirmAccount(account, assumeYes) {
   if (assumeYes) return true;
-  const answer = await askTerminal(
-    `\nDer Server wird mit dem DZPage-Konto »${plain(account) || "?"}« verbunden. Ist das dein Konto? [J/n] `,
-  );
+  const answer = await askTerminal(`\n${t("admin.confirm_account", { account: plain(account) || "?" })} `);
   if (answer === null) return true;
   if (answer === ABORTED) return false;
   if (answer === TIMED_OUT) {
-    const minutes = Math.round(ANSWER_SECONDS / 60);
-    toTerminal(
-      minutes >= 1
-        ? `\nKeine Antwort innerhalb von ${minutes === 1 ? "einer Minute" : `${minutes} Minuten`}.\n`
-        : "\nKeine Antwort.\n",
-    );
+    toTerminal(`\n${t("admin.no_answer", { duration: answerDuration() })}\n`);
     return false;
   }
-  return /^(|j|ja|y|yes)$/i.test(answer);
+  return isYes(answer);
+}
+
+/** "5 Minuten", "2 Sekunden": Einheit und Mehrzahl je Sprache liefert Intl. */
+function answerDuration() {
+  const minutes = Math.round(ANSWER_SECONDS / 60);
+  const [value, unit] = minutes >= 1 ? [minutes, "minute"] : [ANSWER_SECONDS, "second"];
+  return new Intl.NumberFormat(t.locale, { style: "unit", unit, unitDisplay: "long" }).format(value);
 }
 
 /**
@@ -266,7 +273,7 @@ async function declineKey(config, key) {
   let revoked;
   try {
     try {
-      say("Widerrufe den neuen Schlüssel auf dzpage.com …");
+      say(t("admin.revoking"));
     } catch {
       /* Terminal schon weg */
     }
@@ -274,15 +281,8 @@ async function declineKey(config, key) {
   } finally {
     for (const signal of PROMPT_SIGNALS) process.off(signal, ignore);
   }
-  if (revoked.ok) {
-    fail("Nicht verbunden. Der neue Schlüssel ist auf dzpage.com widerrufen; auf diesem Server ändert sich nichts.", EXIT_DECLINED);
-  }
-  fail(
-    "Nicht verbunden; auf diesem Server ändert sich nichts. " +
-      `Den neuen Schlüssel (${key.slice(0, 16)}…) konnte das Panel auf dzpage.com nicht widerrufen (${revoked.code}). ` +
-      "Ist es dein Konto, widerrufe ihn dort unter RCon bei den Panel-Schlüsseln.",
-    EXIT_DECLINED,
-  );
+  if (revoked.ok) fail(t("admin.declined_revoked"), EXIT_DECLINED);
+  fail(t("admin.declined_not_revoked", { key: `${key.slice(0, 16)}…`, code: revoked.code }), EXIT_DECLINED);
 }
 
 async function readPanelState(config) {
@@ -314,9 +314,12 @@ async function withDatabase(config, fn) {
 }
 
 function rejectedNotice(code) {
-  return code === "revoked"
-    ? "Der gespeicherte Schlüssel wurde auf dzpage.com widerrufen. Verbinde neu …"
-    : "DZPage kennt den gespeicherten Schlüssel nicht mehr. Verbinde neu …";
+  return code === "revoked" ? t("admin.key_revoked") : t("admin.key_unknown");
+}
+
+/** " (Konto Name)" hinter einer Aussage, oder nichts (Leerzeichen je Sprache, siehe t.part). */
+function accountSuffix(account) {
+  return account ? t.part("admin.account_suffix", { account: plain(account) }) : "";
 }
 
 /**
@@ -340,10 +343,7 @@ async function adoptAndRegister(config, key, fallbackAccount, { stored = false }
       if (["network", "server", "rate_limited"].includes(adopted.code)) {
         config.dzpage.key = key;
         saveConfig(config);
-        fail(
-          `Schlüssel erhalten, aber die Anmeldung bei DZPage schlug fehl (${adopted.code}). ` +
-            "Erneut versuchen, ohne neu zu koppeln: sudo dzpage-panel link",
-        );
+        fail(t("admin.register_failed", { code: adopted.code }));
       }
       fail(pairError(adopted));
     }
@@ -354,7 +354,7 @@ async function adoptAndRegister(config, key, fallbackAccount, { stored = false }
       message: `Mit DZPage gekoppelt (${account || "Konto unbekannt"})`,
     });
     say("");
-    say(`Verbunden mit dem DZPage-Konto ${plain(account)}. Der Server erscheint jetzt auf dzpage.com unter RCon.`);
+    say(t("admin.linked", { account: plain(account) }));
     return { ok: true };
   } finally {
     await db.close().catch(() => undefined);
@@ -377,7 +377,7 @@ async function storedKeyDecision(config) {
   if (!state.panelId) {
     // Schluessel da, Anmeldung fehlt: die letzte Kopplung brach nach dem
     // Abholen ab. Nachholen, ohne einen neuen Code zu brauchen.
-    say("Schlüssel ist vorhanden, die Anmeldung bei DZPage fehlt noch. Hole sie nach …");
+    say(t("admin.register_pending"));
     const registered = await adoptAndRegister(config, config.dzpage.key, "", { stored: true });
     if (!registered.rejected) return "linked";
     say(rejectedNotice(registered.rejected));
@@ -393,17 +393,17 @@ async function storedKeyDecision(config) {
     say(rejectedNotice(state.rejection.code));
     return "replace";
   }
-  const account = state.account ? ` (Konto ${plain(state.account)})` : "";
+  const account = accountSuffix(state.account);
   if (state.rejection) {
     // Der Vermerk war veraltet (etwa ein von Hand ersetzter Schluessel), aber
     // Herzschlag und Abholer haben seinetwegen angehalten.
     await withDatabase(config, (db) => clearKeyRejected(db));
-    say(`DZPage nimmt den gespeicherten Schlüssel wieder an${account}. Das Panel verbindet sich neu.`);
+    say(t("admin.key_accepted_again", { account }));
     return "linked";
   }
-  say(`Dieser Server ist schon mit DZPage verbunden${account}.`);
-  if (check.status === "unknown") say(`Den Schlüssel konnte DZPage gerade nicht bestätigen (${check.code}).`);
-  say("Mit einem anderen Konto verbinden: sudo dzpage-panel link --force");
+  say(t("admin.already_linked", { account }));
+  if (check.status === "unknown") say(t("admin.check_unknown", { code: check.code }));
+  say(t("admin.other_account"));
   return "connected";
 }
 
@@ -412,7 +412,7 @@ async function link(config, args) {
   const assumeYes = args.includes("--yes");
   const tokenIndex = args.indexOf("--token");
   const token = tokenIndex >= 0 ? args[tokenIndex + 1] : null;
-  if (tokenIndex >= 0 && !token) fail("Nach --token fehlt der Kopplungscode von dzpage.com.");
+  if (tokenIndex >= 0 && !token) fail(t("admin.token_missing"));
 
   // Mit --force ersetzt ein neuer Schluessel einen noch gueltigen. Den alten
   // gibt das Panel danach frei, sonst belegte er auf dzpage.com weiter einen
@@ -429,8 +429,8 @@ async function link(config, args) {
 
   let granted;
   if (token) {
-    if (!isPairToken(token)) fail(PAIR_ERRORS.invalid_token);
-    say("Löse den Kopplungscode bei DZPage ein …");
+    if (!isPairToken(token)) fail(t(PAIR_ERRORS.invalid_token));
+    say(t("admin.redeeming"));
     const result = await redeemPairToken(config, token);
     if (!result.ok) fail(pairError(result));
     granted = { key: result.key, account: result.account ?? "" };
@@ -438,25 +438,37 @@ async function link(config, args) {
     const started = await startDevicePairing(config);
     if (!started.ok) fail(pairError(started));
     say("");
-    say("Diesen Server mit deinem DZPage-Konto verbinden:");
+    say(t("admin.device.intro"));
     say("");
     say(`    ${plain(started.verificationUrl)}`);
     say("");
-    say(`Oder auf dzpage.com/link den Code ${plain(started.userCode)} eingeben.`);
-    say(`Der Code gilt ${Math.round((Number(started.expiresIn) || 900) / 60)} Minuten. Warte auf Bestätigung (Strg+C bricht ab) …`);
+    say(t("admin.device.code", { code: plain(started.userCode) }));
+    say(t("admin.device.wait", { minutes: Math.round((Number(started.expiresIn) || 900) / 60) }));
     const result = await waitForApproval(config, started);
     if (!result.ok) fail(pairError(result));
     granted = result;
   }
 
-  if (!isPanelKey(granted.key)) fail("DZPage hat eine unerwartete Antwort geschickt. Bitte später erneut versuchen.");
+  if (!isPanelKey(granted.key)) fail(t("admin.unexpected"));
   if (!(await confirmAccount(granted.account, assumeYes))) await declineKey(config, granted.key);
   await adoptAndRegister(config, granted.key, granted.account);
   if (previous && previous.key !== granted.key) await releaseOldKey(config, previous);
 }
 
-const OLD_KEY = { nom: "Der alte Schlüssel", acc: "Den alten Schlüssel" };
-const OWN_KEY = { nom: "Der DZPage-Schlüssel dieser Maschine", acc: "Den DZPage-Schlüssel dieser Maschine" };
+// Ganze Saetze je Ausgang statt eines eingesetzten Satzteils: Andere Sprachen
+// beugen "der alte Schluessel" anders oder stellen ihn woanders hin.
+const OLD_KEY = {
+  shared: "admin.release.old.shared",
+  already: "admin.release.old.already",
+  revoked: "admin.release.old.revoked",
+  failed: "admin.release.old.failed",
+};
+const OWN_KEY = {
+  shared: "admin.release.own.shared",
+  already: "admin.release.own.already",
+  revoked: "admin.release.own.revoked",
+  failed: "admin.release.own.failed",
+};
 
 /**
  * Einen Schluessel freigeben, den diese Maschine nicht mehr braucht. DZPage
@@ -464,21 +476,11 @@ const OWN_KEY = { nom: "Der DZPage-Schlüssel dieser Maschine", acc: "Den DZPage
  * angelegter kann auf mehreren stecken. Scheitert das, bleibt alles, wie es
  * war, und der Mensch erfaehrt, wo er es selbst erledigt.
  */
-async function releaseOldKey(config, { key, panelId }, words = OLD_KEY) {
+async function releaseOldKey(config, { key, panelId }, texts = OLD_KEY) {
   const result = await revokeKey(config, key, { panelId });
   const prefix = `${key.slice(0, 16)}…`;
-  if (result.ok && result.shared) {
-    say(`${words.nom} (${prefix}) bleibt auf dzpage.com aktiv, weil ihn noch eine andere Maschine benutzt.`);
-  } else if (result.ok && result.already) {
-    say(`${words.nom} (${prefix}) war auf dzpage.com schon widerrufen.`);
-  } else if (result.ok) {
-    say(`${words.nom} (${prefix}) ist auf dzpage.com widerrufen.`);
-  } else {
-    say(
-      `${words.acc} (${prefix}) konnte das Panel auf dzpage.com nicht widerrufen (${result.code}). ` +
-        "Nutzt ihn keine andere Maschine, widerrufe ihn dort unter RCon bei den Panel-Schlüsseln.",
-    );
-  }
+  const outcome = !result.ok ? "failed" : result.shared ? "shared" : result.already ? "already" : "revoked";
+  say(t(texts[outcome], { key: prefix, code: result.code }));
   return result;
 }
 
@@ -490,7 +492,7 @@ async function releaseOldKey(config, { key, panelId }, words = OLD_KEY) {
  */
 async function forgetKey(config) {
   if (!config.dzpage.key) {
-    say("Kein DZPage-Schlüssel hinterlegt.");
+    say(t("admin.no_key"));
     return;
   }
   const { panelId } = await readPanelState(config);
@@ -499,20 +501,32 @@ async function forgetKey(config) {
 
 /* ---------------------------------------------------------------- Zustand */
 
-/** Datum und Uhrzeit in der Zeitzone der Maschine. */
+/** Datum und Uhrzeit in der Zeitzone der Maschine, Reihenfolge je Sprache. */
 function formatTime(ms) {
   const d = new Date(ms);
   const two = (n) => String(n).padStart(2, "0");
-  return `${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  return t("admin.datetime", {
+    year: d.getFullYear(),
+    month: two(d.getMonth() + 1),
+    day: two(d.getDate()),
+    hour: two(d.getHours()),
+    minute: two(d.getMinutes()),
+  });
 }
 
+/**
+ * "vor 5 Minuten" in der Sprache der Installation. Die Mehrzahlformen (im
+ * Russischen, Polnischen und Tschechischen drei) liefert Intl; eine Node ohne
+ * diese Sprachdaten antwortet auf Englisch statt gar nicht.
+ */
 function ago(ms) {
   const minutes = Math.round(Math.max(0, Date.now() - ms) / 60_000);
-  if (minutes < 1) return "vor weniger als einer Minute";
-  if (minutes < 90) return minutes === 1 ? "vor 1 Minute" : `vor ${minutes} Minuten`;
+  if (minutes < 1) return t("admin.ago_now");
+  const relative = new Intl.RelativeTimeFormat(t.locale, { numeric: "always" });
+  if (minutes < 90) return relative.format(-minutes, "minute");
   const hours = Math.round(minutes / 60);
-  if (hours < 36) return `vor ${hours} Stunden`;
-  return `vor ${Math.round(hours / 24)} Tagen`;
+  if (hours < 36) return relative.format(-hours, "hour");
+  return relative.format(-Math.round(hours / 24), "day");
 }
 
 /**
@@ -521,29 +535,27 @@ function ago(ms) {
  * und Abholer vermerken, und der letzte gelungene Herzschlag.
  */
 async function dzpageStatus(config) {
-  if (!config.dzpage.key) return "nicht verbunden (sudo dzpage-panel link)";
+  if (!config.dzpage.key) return t("admin.status.not_linked");
   let state;
   try {
     state = await readPanelState(config);
   } catch (err) {
-    return `Schlüssel hinterlegt, Zustand nicht lesbar (${plain(err.message)})`;
+    return t("admin.status.unreadable", { error: plain(err.message) });
   }
   if (state.rejection) {
-    const why = state.rejection.code === "revoked" ? "auf dzpage.com widerrufen" : "DZPage kennt ihn nicht";
-    const since = state.rejection.at ? ` seit ${formatTime(state.rejection.at)}` : "";
-    return `Schlüssel abgelehnt (${why})${since}. Neu verbinden: sudo dzpage-panel link`;
+    const since = state.rejection.at ? t.part("admin.status.since", { time: formatTime(state.rejection.at) }) : "";
+    const key = state.rejection.code === "revoked" ? "admin.status.rejected_revoked" : "admin.status.rejected_unknown";
+    return t(key, { since });
   }
-  if (!state.panelId) return "Schlüssel hinterlegt, Anmeldung bei DZPage fehlt (sudo dzpage-panel link)";
-  const account = state.account ? ` (Konto ${plain(state.account)})` : "";
-  if (!state.lastSeenAt) return `Schlüssel hinterlegt${account}, noch kein Kontakt mit DZPage`;
-  const contact = `letzter Kontakt ${formatTime(state.lastSeenAt)} (${ago(state.lastSeenAt)})`;
+  if (!state.panelId) return t("admin.status.not_registered");
+  const account = accountSuffix(state.account);
+  if (!state.lastSeenAt) return t("admin.status.no_contact", { account });
+  const contact = { account, time: formatTime(state.lastSeenAt), ago: ago(state.lastSeenAt) };
   // Drei verpasste Herzschlaege, mindestens fuenf Minuten: Ein Neustart des
   // Dienstes allein soll nicht nach Stoerung aussehen.
   const staleAfterMs = Math.max(3 * (state.heartbeatSeconds || 60), 300) * 1000;
-  if (Date.now() - state.lastSeenAt > staleAfterMs) {
-    return `Schlüssel hinterlegt${account}, aber ${contact}. Protokoll: sudo dzpage-panel logs`;
-  }
-  return `verbunden${account}, ${contact}`;
+  if (Date.now() - state.lastSeenAt > staleAfterMs) return t("admin.status.stale", contact);
+  return t("admin.status.connected", contact);
 }
 
 /* ------------------------------------------------------------------ Steam */
@@ -554,13 +566,17 @@ async function dzpageStatus(config) {
  * durch DZPage. Gespeichert wird nur, was SteamCMD selbst ablegt.
  */
 async function steamLogin(config, account) {
-  if (!ACCOUNT_PATTERN.test(account || "")) fail("Bitte den Steam-Kontonamen angeben: sudo dzpage-panel steam-login <konto>");
-  const quietJob = { append: (text) => process.stdout.write(`${String(text).trim()}\n`) };
+  if (!ACCOUNT_PATTERN.test(account || "")) fail(t("admin.steam.account_needed"));
+  const steps = { download: "admin.steam.downloading", unpack: "admin.steam.unpacking" };
+  const quietJob = {
+    append: (text) => process.stdout.write(`${String(text).trim()}\n`),
+    step: (name, vars) => say(t(steps[name] ?? name, vars)),
+  };
   const found = await ensureSteamCmd(config, quietJob);
   mkdirSync(STEAM_HOME, { recursive: true, mode: 0o750 });
 
-  say(`Melde ${account} bei Steam an. SteamCMD fragt gleich selbst nach Passwort und gegebenenfalls Steam-Guard.`);
-  say("Der erste Start lädt SteamCMD nach und dauert ein bis zwei Minuten.");
+  say(t("admin.steam.signing_in", { account }));
+  say(t("admin.steam.first_start"));
   const code = await new Promise((resolve) => {
     const child = spawn(found.path, ["+login", account, "+quit"], {
       stdio: "inherit",
@@ -569,10 +585,10 @@ async function steamLogin(config, account) {
     child.on("error", () => resolve(1));
     child.on("close", (exit) => resolve(exit ?? 1));
   });
-  if (code !== 0) say(`SteamCMD endete mit ${code}. Prüfe, ob die gemerkte Anmeldung trotzdem trägt …`);
+  if (code !== 0) say(t("admin.steam.exit", { code }));
 
   const check = await verifySession({ steamcmdPath: found.path, account });
-  if (!check.ok) fail(`Die Anmeldung trägt nicht: ${check.message}`);
+  if (!check.ok) fail(t("admin.steam.not_working", { reason: steamReason(check) }));
 
   const db = await ensureDatabase(config);
   try {
@@ -582,7 +598,15 @@ async function steamLogin(config, account) {
   } finally {
     await db.close().catch(() => undefined);
   }
-  say(`Angemeldet als ${account}. Downloads laufen ab jetzt ohne Passwort.`);
+  say(t("admin.steam.done", { account }));
+}
+
+/** Warum die Anmeldung nicht traegt. Den Text von Steam selbst gibt es nur auf Englisch. */
+function steamReason(check) {
+  if (check.code === "session") return t("admin.steam.reason_session");
+  if (check.code === "unconfirmed") return t("admin.steam.reason_unconfirmed");
+  if (check.code === "account") return t("admin.steam.account_needed");
+  return plain(check.message);
 }
 
 /* ---------------------------------------------------------------- Aufruf */
@@ -595,4 +619,4 @@ else if (command === "link") await link(config, rest);
 else if (command === "dzpage-status") say(await dzpageStatus(config));
 else if (command === "forget-key") await forgetKey(config);
 else if (command === "steam-login") await steamLogin(config, rest[0]);
-else fail("Aufruf: dzpage-panel-admin.js link [--token ...] [--force] | dzpage-status | steam-login <konto> | reset-password [benutzer]");
+else fail(t("admin.usage"));

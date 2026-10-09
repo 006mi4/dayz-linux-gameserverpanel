@@ -9,6 +9,7 @@
 #   sudo ./install.sh --no-steam-deps     ohne 32-Bit-Bibliotheken fuer SteamCMD
 #   sudo ./install.sh --no-node           keine eigene Node-Laufzeit installieren
 #   sudo ./install.sh --with-docker       Docker-Laufzeit freischalten (siehe README)
+#   sudo ./install.sh --lang <sprache>    Sprache der Terminal-Texte (en, de, fr, ...)
 #
 # Das Skript ist mehrfach ausfuehrbar: ein zweiter Lauf aktualisiert die
 # Dateien und startet den Dienst neu, ohne Konfiguration oder Daten anzufassen.
@@ -29,12 +30,35 @@ SOURCE_DIR=$(cd "$(dirname "$0")" && pwd)
 # So lange warten die Fragen im Terminal auf eine Antwort.
 ANSWER_SECONDS=300
 
+# Die Sprache steht vor allem anderen fest, auch vor der Pruefung der
+# Argumente. Gemerkt wird sie in install.json, aber nur, wenn sie mit --lang
+# ausdruecklich gewaehlt wurde (dzpage.com haengt die Sprache der Seite an den
+# Befehl); sonst bleibt die gemerkte, und ohne beides gilt die Umgebung.
+# shellcheck source=helper/i18n.sh
+. "$SOURCE_DIR/helper/i18n.sh"
+i18n_init "$SOURCE_DIR/src/i18n/terminal" "$(i18n_arg "$@")"
+LOCALE_LIST=${I18N_LOCALES// /, }
+
+usage() {
+  printf '%s\n\n' "$(t install.help.title)"
+  printf '  %-38s %s\n' "sudo ./install.sh" "$(t install.help.default)"
+  printf '  %-38s %s\n' "sudo ./install.sh --pair <code>" "$(t install.help.pair)"
+  printf '  %-38s %s\n' "sudo ./install.sh --no-link" "$(t install.help.no_link)"
+  printf '  %-38s %s\n' "sudo ./install.sh --domain <name>" "$(t install.help.domain)"
+  printf '  %-38s %s\n' "sudo ./install.sh --no-steam-deps" "$(t install.help.no_steam_deps)"
+  printf '  %-38s %s\n' "sudo ./install.sh --no-node" "$(t install.help.no_node)"
+  printf '  %-38s %s\n' "sudo ./install.sh --with-docker" "$(t install.help.with_docker)"
+  printf '  %-38s %s\n' "sudo ./install.sh --lang <code>" "$(t install.help.lang locales="$LOCALE_LIST")"
+  printf '\n%s\n' "$(t install.help.rerun)"
+}
+
 WITH_STEAM_DEPS=1
 WITH_NODE_INSTALL=1
 WITH_DOCKER=0
 DOMAIN=""
 PAIR_TOKEN=""
 LINK=1
+LANG_WANTED=""
 # Was die Selbstaktualisierung bei jeder neuen Fassung wieder mitgibt. Domain
 # und Kopplungscode gehoeren nicht dazu: HTTPS wird einmal eingerichtet und
 # bleibt, und ein Kopplungscode gilt genau einmal.
@@ -44,21 +68,34 @@ while [ "$#" -gt 0 ]; do
     --no-steam-deps) WITH_STEAM_DEPS=0; PERSIST_ARGS+=("$1") ;;
     --no-node) WITH_NODE_INSTALL=0; PERSIST_ARGS+=("$1") ;;
     --with-docker) WITH_DOCKER=1; PERSIST_ARGS+=("$1") ;;
-    --domain) [ "$#" -ge 2 ] || { echo "--domain braucht einen Namen" >&2; exit 2; }; DOMAIN=$2; shift ;;
+    --domain) [ "$#" -ge 2 ] || { t install.domain_needs_name >&2; echo >&2; exit 2; }; DOMAIN=$2; shift ;;
     --domain=*) DOMAIN=${1#--domain=} ;;
-    --pair) [ "$#" -ge 2 ] || { echo "--pair braucht den Code von dzpage.com" >&2; exit 2; }; PAIR_TOKEN=$2; shift ;;
+    --pair) [ "$#" -ge 2 ] || { t install.pair_needs_code >&2; echo >&2; exit 2; }; PAIR_TOKEN=$2; shift ;;
     --pair=*) PAIR_TOKEN=${1#--pair=} ;;
     --no-link) LINK=0 ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
-    *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
+    --lang)
+      case "${2:-}" in ""|-*) t install.lang_needs_code locales="$LOCALE_LIST" >&2; echo >&2; exit 2 ;; esac
+      LANG_WANTED=$2; shift ;;
+    --lang=*) LANG_WANTED=${1#--lang=} ;;
+    -h|--help) usage; exit 0 ;;
+    *) t common.unknown_option option="$1" >&2; echo >&2; exit 2 ;;
   esac
   shift
 done
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
-warn() { printf '  \033[33mAchtung:\033[0m %s\n' "$*"; }
-die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
+warn() { printf '  \033[33m%s\033[0m %s\n' "$(t common.warning)" "$*"; }
+die() { printf '\n\033[31m%s\033[0m %s\n' "$(t common.error)" "$*" >&2; exit 1; }
+
+# Eine unbekannte Sprache ist kein Grund, die Installation abzubrechen: Kennt
+# dzpage.com eines Tages eine Sprache mehr als dieses Panel, geht es auf
+# Englisch weiter (oder in der gemerkten Sprache).
+[ -z "$I18N_REJECTED" ] || warn "$(t common.lang_unknown lang="$I18N_REJECTED" locales="$LOCALE_LIST")"
+STORE_LANG=$I18N_STORED
+if [ -n "$LANG_WANTED" ] && [ -z "$I18N_REJECTED" ]; then
+  STORE_LANG=$I18N_LOCALE
+fi
 
 # Ein Befehl als Dienstbenutzer. Fuer Lesezugriffe in seinen Verzeichnissen:
 # Dort kann er Eintraege gegen Verweise tauschen, und als er selbst erreicht
@@ -70,12 +107,12 @@ as_service() { setpriv --reuid="$SERVICE_USER" --regid="$SERVICE_USER" --clear-g
 replace_root_file() {
   local dest=$1 tmp
   tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX") \
-    || die "$dest liess sich nicht schreiben (keine Nebendatei in $(dirname "$CONFIG_DIR"))."
+    || die "$(t install.write_failed_tmp file="$dest" dir="$(dirname "$CONFIG_DIR")")"
   if cat > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$dest"; then
     return 0
   fi
   rm -f "$tmp"
-  die "$dest liess sich nicht schreiben."
+  die "$(t install.write_failed file="$dest")"
 }
 
 # apt-get, das auf eine belegte Paketverwaltung wartet, statt sofort mit 100
@@ -103,25 +140,25 @@ apt_get() {
       else
         printf '%s\n' "$out" >&2
       fi
-      [ "$locked" -eq 0 ] || warn "Die Paketverwaltung war $APT_WAIT_SECONDS Sekunden lang belegt. Spaeter erneut ausfuehren." >&2
+      [ "$locked" -eq 0 ] || warn "$(t common.apt_locked seconds="$APT_WAIT_SECONDS")" >&2
       return "$rc"
     fi
-    [ "$waited" -eq 1 ] || note "Die Paketverwaltung ist gerade belegt (meist automatische Updates nach dem Start). Warte, bis sie frei ist ..." >&2
+    [ "$waited" -eq 1 ] || note "$(t common.apt_busy)" >&2
     waited=1
     sleep 10
   done
 }
 
-[ "$(id -u)" -eq 0 ] || die "Bitte mit sudo ausfuehren."
-[ -d /run/systemd/system ] || die "Dieses System benutzt kein systemd."
-[ -f "$SOURCE_DIR/bin/dzpage-panel.js" ] || die "install.sh muss im entpackten Panel-Verzeichnis liegen."
+[ "$(id -u)" -eq 0 ] || die "$(t common.need_root)"
+[ -d /run/systemd/system ] || die "$(t install.no_systemd)"
+[ -f "$SOURCE_DIR/bin/dzpage-panel.js" ] || die "$(t install.not_in_source)"
 
 # Erstinstallation oder Aktualisierung? Nur bei der ersten wird gefragt.
 FIRST_INSTALL=1
 [ -f "$CONFIG_DIR/install.json" ] && FIRST_INSTALL=0
 
 # ---------------------------------------------------------------- Vorpruefung
-say "Vorpruefung"
+say "$(t install.precheck)"
 # DayZServer und SteamCMD gibt es nur fuer x86_64. Auf einem ARM-Rechner
 # liefe das Panel, koennte aber keinen einzigen Server starten.
 #
@@ -131,11 +168,11 @@ say "Vorpruefung"
 ARCH=$(uname -m)
 if [ "$ARCH" != "x86_64" ]; then
   if [ "$FIRST_INSTALL" -eq 1 ]; then
-    die "Diese Maschine ist $ARCH. Den DayZ-Server und SteamCMD gibt es nur fuer x86_64 (amd64)."
+    die "$(t install.arch_unsupported arch="$ARCH")"
   fi
-  warn "Diese Maschine ist $ARCH. Spielserver laufen hier nicht; das Panel wird trotzdem aktualisiert."
+  warn "$(t install.arch_update arch="$ARCH")"
 else
-  note "Architektur $ARCH"
+  note "$(t install.arch arch="$ARCH")"
 fi
 
 if [ -r /etc/os-release ]; then
@@ -148,27 +185,27 @@ if [ -r /etc/os-release ]; then
   # ohne sudo, git und xz. Alles andere ist ungeprueft.
   case "$OS_ID:$OS_VERSION" in
     ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) note "$OS_NAME" ;;
-    *) warn "$OS_NAME ist ungeprueft. Geprueft sind Ubuntu 22.04 und 24.04 und Debian 12 und 13; weiter auf eigene Verantwortung." ;;
+    *) warn "$(t install.os_untested os="$OS_NAME")" ;;
   esac
 fi
 
 MEM_MB=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)
 if [ "$MEM_MB" -lt 3500 ]; then
-  warn "Nur ${MEM_MB} MB Arbeitsspeicher. Ein DayZ-Server braucht im Betrieb 3 bis 6 GB."
+  warn "$(t install.memory_low mb="$MEM_MB")"
 else
-  note "${MEM_MB} MB Arbeitsspeicher"
+  note "$(t install.memory mb="$MEM_MB")"
 fi
 mkdir -p "$(dirname "$DATA_DIR")"
 FREE_GB=$(df -Pk "$(dirname "$DATA_DIR")" 2>/dev/null | awk 'NR==2 {print int($4 / 1048576)}')
 if [ "${FREE_GB:-0}" -lt 12 ]; then
-  warn "Nur ${FREE_GB:-0} GB frei unter $(dirname "$DATA_DIR"). Ein DayZ-Server braucht etwa 6 GB, mit Mods deutlich mehr."
+  warn "$(t install.disk_low gb="${FREE_GB:-0}" dir="$(dirname "$DATA_DIR")")"
 else
-  note "${FREE_GB} GB frei unter $(dirname "$DATA_DIR")"
+  note "$(t install.disk gb="$FREE_GB" dir="$(dirname "$DATA_DIR")")"
 fi
 
 case "$PAIR_TOKEN" in
   ""|dzp_pair_*) ;;
-  *) die "Der Kopplungscode beginnt mit dzp_pair_. Auf dzpage.com unter RCon einen neuen Befehl holen." ;;
+  *) die "$(t install.pair_format)" ;;
 esac
 
 # Aus einem Git-Arbeitsverzeichnis installiert? Dann kann sich das Panel spaeter
@@ -179,7 +216,7 @@ SOURCE_IS_GIT=0
 
 # ---------------------------------------------------------------- Pakete
 if command -v apt-get >/dev/null 2>&1; then
-  say "Systempakete pruefen"
+  say "$(t install.packages)"
   export DEBIAN_FRONTEND=noninteractive
   MISSING=""
   # util-linux liefert script(1) — ohne Terminal kann SteamCMD nicht nach dem
@@ -199,28 +236,27 @@ if command -v apt-get >/dev/null 2>&1; then
   if [ "$WITH_STEAM_DEPS" -eq 1 ]; then
     # SteamCMD ist 32-Bit, auch auf 64-Bit-Systemen.
     dpkg --print-foreign-architectures | grep -qx i386 || {
-      note "i386-Architektur fuer SteamCMD ergaenzen"
+      note "$(t install.add_i386)"
       dpkg --add-architecture i386
       apt_get update -qq
     }
     dpkg -s lib32gcc-s1 >/dev/null 2>&1 || MISSING="$MISSING lib32gcc-s1"
   fi
   if [ -n "$MISSING" ]; then
-    note "installiere:$MISSING"
+    note "$(t install.installing packages="${MISSING# }")"
     apt_get update -qq
     # shellcheck disable=SC2086
     apt_get install -y -qq $MISSING
   else
-    note "alles vorhanden"
+    note "$(t install.packages_ok)"
   fi
 else
-  say "Kein apt gefunden, bitte selbst sicherstellen"
-  note "util-linux (script), tar, xz, ca-certificates und die 32-Bit-Bibliothek"
-  note "libgcc (i386) fuer SteamCMD muessen vorhanden sein."
+  say "$(t install.no_apt)"
+  note "$(t install.no_apt_list)"
 fi
 
 # ---------------------------------------------------------------- Node
-say "Node-Laufzeit"
+say "$(t install.node)"
 case "$(uname -m)" in
   x86_64) NODE_ARCH=linux-x64 ;;
   aarch64|arm64) NODE_ARCH=linux-arm64 ;;
@@ -274,7 +310,7 @@ replace_node_runtime() {
     rm -rf "$fresh"
     return 1
   fi
-  rm -rf "$old" || warn "$old liess sich nicht ganz entfernen; es wird nicht mehr benutzt."
+  rm -rf "$old" || warn "$(t install.node_old_left dir="$old")"
 }
 
 # Bis 0.5.3 entpackte tar als root mit dem Besitzer aus dem Archiv: Die eigene
@@ -303,15 +339,15 @@ discard_node_runtime() {
 rm -rf "$APP_DIR/node.neu" "$APP_DIR/node.alt" || true
 if node_runtime_untrusted; then
   if [ "$WITH_NODE_INSTALL" -eq 1 ]; then
-    note "Die Node-Laufzeit in $APP_DIR/node gehoert nicht root (Installationen bis 0.5.3); sie wird durch eine frisch geladene ersetzt."
+    note "$(t install.node_untrusted dir="$APP_DIR/node")"
     if ! replace_node_runtime; then
       discard_node_runtime || true
-      die "Die Node-Laufzeit liess sich nicht neu laden. Die alte gehoerte nicht root und ist entfernt; bitte erneut ausfuehren, sobald nodejs.org erreichbar ist."
+      die "$(t install.node_reload_failed)"
     fi
-    note "Pruefsumme stimmt (SHASUMS256.txt von nodejs.org)"
+    note "$(t install.node_checksum)"
   else
-    discard_node_runtime || die "$APP_DIR/node gehoert nicht root und liess sich nicht beiseitelegen."
-    note "Die Node-Laufzeit in $APP_DIR/node gehoerte nicht root und ist entfernt (--no-node)."
+    discard_node_runtime || die "$(t install.node_discard_failed dir="$APP_DIR/node")"
+    note "$(t install.node_discarded dir="$APP_DIR/node")"
   fi
 fi
 
@@ -331,14 +367,14 @@ done
 
 if [ -z "$NODE_BIN" ] && [ "$WITH_NODE_INSTALL" -eq 1 ]; then
   [ -n "$NODE_ARCH" ] \
-    || die "Nicht unterstuetzte Architektur: $(uname -m). Bitte Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer selbst installieren."
-  note "Kein Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer gefunden, installiere eine eigene Laufzeit nach $APP_DIR/node"
-  replace_node_runtime || die "Node konnte nicht installiert werden."
-  note "Pruefsumme stimmt (SHASUMS256.txt von nodejs.org)"
+    || die "$(t install.node_arch arch="$(uname -m)" version="$NODE_MAJOR_MIN.$NODE_MINOR_MIN")"
+  note "$(t install.node_installing version="$NODE_MAJOR_MIN.$NODE_MINOR_MIN" dir="$APP_DIR/node")"
+  replace_node_runtime || die "$(t install.node_failed)"
+  note "$(t install.node_checksum)"
   NODE_BIN="$APP_DIR/node/bin/node"
 fi
 
-[ -n "$NODE_BIN" ] || die "Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer wird gebraucht (oder ohne --no-node erneut versuchen)."
+[ -n "$NODE_BIN" ] || die "$(t install.node_missing version="$NODE_MAJOR_MIN.$NODE_MINOR_MIN")"
 note "$NODE_BIN ($("$NODE_BIN" --version))"
 
 # node:sqlite braucht bis Node 22.12 einen Schalter.
@@ -347,32 +383,32 @@ NODE_FLAGS=""
 if ! "$NODE_BIN" -e 'require("node:sqlite")' >/dev/null 2>&1; then
   if "$NODE_BIN" --experimental-sqlite -e 'require("node:sqlite")' >/dev/null 2>&1; then
     NODE_FLAGS="--experimental-sqlite"
-    note "node:sqlite braucht hier $NODE_FLAGS"
+    note "$(t install.node_flags flags="$NODE_FLAGS")"
   else
-    die "$NODE_BIN kann node:sqlite nicht. Bitte ein Node $NODE_MAJOR_MIN.$NODE_MINOR_MIN oder neuer mit node:sqlite verwenden."
+    die "$(t install.node_sqlite node="$NODE_BIN" version="$NODE_MAJOR_MIN.$NODE_MINOR_MIN")"
   fi
 fi
 
 # ---------------------------------------------------------------- Benutzer und Verzeichnisse
 if [ "$WITH_DOCKER" -eq 1 ]; then
-  say "Docker-Laufzeit"
+  say "$(t install.docker)"
   if ! command -v docker >/dev/null 2>&1; then
-    die "Docker ist nicht installiert. Erst Docker einrichten, dann erneut mit --with-docker."
+    die "$(t install.docker_missing)"
   fi
   # Ehrlich bleiben: Wer in der docker-Gruppe ist, kann auf dieser Maschine
   # alles. Das liegt an Docker, nicht am Panel — aber wissen sollte man es.
-  note "ACHTUNG: Der Dienstbenutzer kommt in die Gruppe docker."
-  note "Das entspricht auf dieser Maschine faktisch Rootrechten, so ist Docker gebaut."
+  note "$(t install.docker_group)"
+  note "$(t install.docker_root)"
 fi
 
-say "Dienstbenutzer und Verzeichnisse"
+say "$(t install.users)"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
-  note "Benutzer $SERVICE_USER angelegt"
+  note "$(t install.user_created user="$SERVICE_USER")"
 fi
 if [ "$WITH_DOCKER" -eq 1 ]; then
   usermod -aG docker "$SERVICE_USER"
-  note "$SERVICE_USER ist jetzt in der Gruppe docker"
+  note "$(t install.user_docker user="$SERVICE_USER")"
 fi
 
 # Das Konfigurationsverzeichnis gehoert dem Dienst, nicht root: das Panel legt
@@ -409,7 +445,7 @@ for name in panel.json setup-code; do
     fs.fchownSync(fd, Number(uid), Number(gid));
     fs.fchmodSync(fd, 0o600);
   ' "$CONFIG_DIR/$name" "$(id -u "$SERVICE_USER")" "$(id -g "$SERVICE_USER")" \
-    || warn "$CONFIG_DIR/$name bleibt, wie sie ist (Verweis, harter Link oder keine gewoehnliche Datei). Der Dienst braucht dort eine Datei, die ihm gehoert, mit 0600."
+    || warn "$(t install.file_kept file="$CONFIG_DIR/$name")"
 done
 #
 # 0751 und nicht 0750: Jeder Spielserver laeuft unter einem eigenen Benutzer und
@@ -447,18 +483,18 @@ install -d -m 0751 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
   fs.fchownSync(fd, Number(uid), Number(gid));
   fs.fchmodSync(fd, 0o751);
 ' "$DATA_DIR/servers" "$(id -u "$SERVICE_USER")" "$(id -g "$SERVICE_USER")" \
-  || warn "$DATA_DIR/servers bleibt, wie es ist (Verweis oder kein Verzeichnis). Der Dienst braucht dort ein Verzeichnis, das ihm gehoert, mit 0751."
-note "$CONFIG_DIR und $DATA_DIR bereit"
+  || warn "$(t install.dir_kept dir="$DATA_DIR/servers")"
+note "$(t install.dirs_ready config="$CONFIG_DIR" data="$DATA_DIR")"
 
 # ---------------------------------------------------------------- Dateien
-say "Programmdateien nach $APP_DIR"
+say "$(t install.files dir="$APP_DIR")"
 install -d -m 0755 "$APP_DIR"
 for item in bin src public package.json systemd; do
   rm -rf "${APP_DIR:?}/$item"
   cp -a "$SOURCE_DIR/$item" "$APP_DIR/$item"
 done
 chown -R root:root "$APP_DIR/bin" "$APP_DIR/src" "$APP_DIR/public" "$APP_DIR/package.json"
-note "$(du -sh "$APP_DIR" | cut -f1) installiert"
+note "$(t install.files_size size="$(du -sh "$APP_DIR" | cut -f1)")"
 
 # Das Hilfsprogramm gehoert root und darf vom Dienstbenutzer nicht veraenderbar
 # sein: Es laeuft als root, wer es aendern koennte, waere root.
@@ -466,12 +502,14 @@ install -m 0755 -o root -g root "$SOURCE_DIR/helper/dzpage-panel-helper.sh" "$AP
 install -m 0755 -o root -g root "$SOURCE_DIR/helper/launch-server.sh" "$APP_DIR/launch-server.sh"
 install -m 0755 -o root -g root "$SOURCE_DIR/helper/https.sh" "$APP_DIR/https.sh"
 install -m 0755 -o root -g root "$SOURCE_DIR/helper/uninstall.sh" "$APP_DIR/uninstall.sh"
+# Wird eingebunden, nicht ausgefuehrt; die Texte dazu liegen unter src/.
+install -m 0644 -o root -g root "$SOURCE_DIR/helper/i18n.sh" "$APP_DIR/i18n.sh"
 for unit in dzpage-server@.service dzpage-panel-helper.socket dzpage-panel-helper@.service; do
   install -m 0644 -o root -g root "$SOURCE_DIR/systemd/$unit" "/etc/systemd/system/$unit"
 done
 
 # ---------------------------------------------------------------- Herkunft
-say "Herkunft und Selbstaktualisierung"
+say "$(t install.origin)"
 INSTALL_METHOD=manual
 CHECKOUT=""
 REPOSITORY=""
@@ -503,10 +541,10 @@ if [ "$INSTALL_METHOD" = "git" ]; then
     "$SOURCE_DIR/helper/self-update.sh" > "$APP_DIR/self-update.sh"
   chown root:root "$APP_DIR/self-update.sh"
   chmod 0755 "$APP_DIR/self-update.sh"
-  note "Aktualisierung ueber $REPOSITORY"
+  note "$(t install.origin_git repo="$REPOSITORY")"
 else
   rm -f "$APP_DIR/self-update.sh"
-  note "Von Hand installiert: Das Panel meldet Aktualisierungen, spielt sie aber nicht ein."
+  note "$(t install.origin_manual)"
 fi
 
 ARGS_JSON=""
@@ -527,6 +565,7 @@ replace_root_file "$CONFIG_DIR/install.json" <<EOF
   "checkout": "$CHECKOUT",
   "repository": "$REPOSITORY",
   "args": [$ARGS_JSON],
+  "lang": "$STORE_LANG",
   "installedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -541,9 +580,9 @@ sed -e "s|@NODE@|$(sed_escape_cli "$NODE_BIN")|" \
 chown root:root "$CLI.new"
 chmod 0755 "$CLI.new"
 mv "$CLI.new" "$CLI"
-note "Befehl $CLI (sudo dzpage-panel help)"
+note "$(t install.cli cli="$CLI")"
 
-say "Privilegierter Helfer"
+say "$(t install.helper)"
 # Kein sudo: Die Unit des Panels ist gehaertet, und Optionen wie PrivateDevices
 # setzen implizit NoNewPrivileges — sudo koennte dann gar nichts mehr erhoehen.
 # Stattdessen ein Socket, den nur der Dienstbenutzer oeffnen darf; systemd
@@ -552,14 +591,14 @@ rm -f /etc/sudoers.d/dzpage-panel
 systemctl daemon-reload
 systemctl enable --quiet dzpage-panel-helper.socket
 systemctl restart dzpage-panel-helper.socket
-note "Socket: $(systemctl is-active dzpage-panel-helper.socket) (/run/dzpage-panel-helper.sock)"
+note "$(t install.socket state="$(systemctl is-active dzpage-panel-helper.socket)")"
 
 # ---------------------------------------------------------------- Dienst
-say "systemd-Dienst"
+say "$(t install.service)"
 sed "s|^ExecStart=.*|ExecStart=$NODE_BIN $NODE_FLAGS $APP_DIR/bin/dzpage-panel.js|" \
   "$SOURCE_DIR/systemd/dzpage-panel.service" > "$UNIT"
 chmod 0644 "$UNIT"
-systemd-analyze verify "$UNIT" || die "Die Unit-Datei ist fehlerhaft."
+systemd-analyze verify "$UNIT" || die "$(t install.unit_broken)"
 systemctl daemon-reload
 systemctl enable --quiet dzpage-panel
 systemctl restart dzpage-panel
@@ -579,7 +618,7 @@ done
 
 if [ "${READY:-0}" != "1" ]; then
   systemctl status dzpage-panel --no-pager --lines=20 || true
-  die "Der Dienst ist nicht hochgekommen. Protokoll: journalctl -u dzpage-panel -e"
+  die "$(t install.not_up)"
 fi
 
 # ---------------------------------------------------------------- HTTPS
@@ -587,14 +626,14 @@ fi
 # Abbruch, sondern ein Hinweis, wie es spaeter nachzuholen ist.
 if [ -n "$DOMAIN" ]; then
   if ! "$APP_DIR/https.sh" enable "$DOMAIN"; then
-    warn "HTTPS liess sich nicht einrichten (siehe oben). Spaeter nachholen: sudo dzpage-panel https enable $DOMAIN"
+    warn "$(t install.https_failed domain="$DOMAIN")"
   fi
 fi
 
 # ---------------------------------------------------------------- Lokale Oberflaeche
 # Verwaltet wird ueber dzpage.com. Die lokale Oberflaeche ist der Notzugang,
 # deshalb steht sie hier kurz und vor der Kopplung, die den Abschluss bildet.
-say "Lokale Oberflaeche (optional)"
+say "$(t install.local_ui)"
 # Als Dienstbenutzer gelesen: Bei der Selbstaktualisierung geht diese Ausgabe
 # in self-update.log, und root braechte ueber einen Verweis anstelle der Datei
 # den Anfang jeder Datei dorthin, die nur root lesen darf. timeout, weil eine
@@ -604,20 +643,20 @@ if [ -n "$HTTPS_DOMAIN" ]; then
   note "https://$HTTPS_DOMAIN"
 else
   HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-  note "http://127.0.0.1:$PORT, vom eigenen Rechner aus ueber einen SSH-Tunnel:"
-  note "    ssh -L $PORT:127.0.0.1:$PORT ${SUDO_USER:-root}@${HOST_IP:-<diese-maschine>}"
-  note "Mit eigener Domain und HTTPS: sudo dzpage-panel https enable panel.example.com"
+  note "$(t install.local_url port="$PORT")"
+  note "    ssh -L $PORT:127.0.0.1:$PORT ${SUDO_USER:-root}@${HOST_IP:-$(t install.this_machine)}"
+  note "$(t install.https_hint)"
 fi
 if [ -s "$CONFIG_DIR/setup-code" ]; then
   # Nur auf ein Terminal: Bei der Selbstaktualisierung geht diese Ausgabe in
   # eine Protokolldatei, und dort hat ein Geheimnis nichts verloren.
   if [ -t 1 ]; then
-    note "Einrichtungscode dafuer: $(cat "$CONFIG_DIR/setup-code")"
+    note "$(t install.setup_code code="$(cat "$CONFIG_DIR/setup-code")")"
   else
-    note "Einrichtungscode dafuer: sudo dzpage-panel setup-code"
+    note "$(t install.setup_code_cmd)"
   fi
 fi
-note "Protokoll: sudo dzpage-panel logs   Zustand: sudo dzpage-panel status"
+note "$(t install.logs_status)"
 
 # ---------------------------------------------------------------- Kopplung
 # Der Moment, um den es geht: Server und DZPage-Konto verbinden. Mit dem Code
@@ -663,14 +702,14 @@ if [ "$LINKED" -eq 1 ]; then
   # ihn nur, wenn DZPage ihn ablehnt (widerrufen): Derselbe Befehl ein zweites
   # Mal koppelt so nicht doppelt, einer nach dem Widerrufen aber schon.
   if [ -n "$PAIR_TOKEN" ]; then
-    say "Mit DZPage verbinden"
+    say "$(t install.link)"
     if ! pair --token "$PAIR_TOKEN"; then
       LINKED=0
-      warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+      warn "$(t install.not_linked)"
     fi
   fi
 elif [ -n "$PAIR_TOKEN" ]; then
-  say "Mit DZPage verbinden"
+  say "$(t install.link)"
   PAIR_RC=0
   pair --token "$PAIR_TOKEN" || PAIR_RC=$?
   # Link und Code nur, wenn der Code selbst nicht ging (Exit 1: abgelaufen,
@@ -679,18 +718,18 @@ elif [ -n "$PAIR_TOKEN" ]; then
   if [ "$PAIR_RC" -eq 0 ]; then
     LINKED=1
   elif [ "$PAIR_RC" -eq 1 ] && [ "$TERMINAL" -eq 1 ] && [ "$LINK" -eq 1 ]; then
-    note "Dann mit Link und Code:"
-    pair && LINKED=1 || warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+    note "$(t install.link_fallback)"
+    pair && LINKED=1 || warn "$(t install.not_linked)"
   elif [ "$PAIR_RC" -eq 1 ]; then
-    warn "Nicht verbunden. Spaeter mit Link und Code: sudo dzpage-panel link"
+    warn "$(t install.not_linked_later)"
   else
-    warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+    warn "$(t install.not_linked)"
   fi
 elif [ "$LINK" -eq 1 ] && [ "$TERMINAL" -eq 1 ]; then
-  say "Mit DZPage verbinden"
-  pair && LINKED=1 || warn "Nicht verbunden. Spaeter: sudo dzpage-panel link"
+  say "$(t install.link)"
+  pair && LINKED=1 || warn "$(t install.not_linked)"
 else
-  say "Mit DZPage verbinden"
+  say "$(t install.link)"
   note "sudo dzpage-panel link"
 fi
 
@@ -698,9 +737,9 @@ fi
 # Ohne Steam-Konto mit DayZ laedt kein Server herunter. Das Passwort tippt der
 # Mensch direkt in SteamCMD; es geht weder durch dieses Skript noch zu DZPage.
 if [ "$LINKED" -eq 1 ] && { [ "$FIRST_INSTALL" -eq 1 ] || [ -n "$PAIR_TOKEN" ]; } && [ "$TERMINAL" -eq 1 ]; then
-  say "Steam"
-  note "Ein DayZ-Server braucht ein Steam-Konto, das DayZ besitzt (anonym verweigert Steam den Download)."
-  printf '  Steam-Kontoname (leer lassen, um es spaeter mit "sudo dzpage-panel steam-login <konto>" zu tun): '
+  say "$(t install.steam)"
+  note "$(t install.steam_why)"
+  printf '  %s ' "$(t install.steam_prompt)"
   # Mit Frist, damit eine Installation ohne Menschen davor trotzdem endet.
   # Strg+C, Strg+D und keine Antwort ueberspringen nur diesen Schritt.
   claim_terminal
@@ -711,20 +750,20 @@ if [ "$LINKED" -eq 1 ] && { [ "$FIRST_INSTALL" -eq 1 ] || [ -n "$PAIR_TOKEN" ]; 
   if [ "$STEAM_RC" -ne 0 ]; then
     STEAM_ACCOUNT=""
     printf '\n'
-    note "Uebersprungen. Spaeter: sudo dzpage-panel steam-login <konto>"
+    note "$(t install.steam_skipped)"
   fi
   STEAM_ACCOUNT=$(printf '%s' "$STEAM_ACCOUNT" | tr -d '[:space:]')
   if [ -n "$STEAM_ACCOUNT" ]; then
     interactive "$CLI" steam-login "$STEAM_ACCOUNT" < /dev/tty \
-      || warn "Steam-Anmeldung nicht abgeschlossen. Spaeter: sudo dzpage-panel steam-login $STEAM_ACCOUNT"
+      || warn "$(t install.steam_failed account="$STEAM_ACCOUNT")"
   fi
 fi
 
-say "Fertig"
+say "$(t install.done)"
 if [ "$LINKED" -eq 1 ]; then
-  note "Das Panel steht jetzt auf dzpage.com unter RCon bei deinen verbundenen Servern."
+  note "$(t install.done_linked)"
 fi
 if [ "$INSTALL_METHOD" = "git" ]; then
-  note "Das Panel aktualisiert sich selbst, sobald eine neue Fassung erscheint."
+  note "$(t install.done_selfupdate)"
 fi
 printf '\n'

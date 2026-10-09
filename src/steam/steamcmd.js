@@ -120,6 +120,10 @@ function runQuiet(command, args, { cwd } = {}) {
  * heruntergeladen und entpackt wird als Dienstbenutzer. Die 32-Bit-Bibliotheken,
  * die SteamCMD braucht, kann nur der Installer setzen — fehlen sie, sagt der
  * erste Lauf es im Klartext.
+ *
+ * Hat `job` ein `step`, bekommt es die beiden Fortschrittsschritte als Name
+ * ("download", "unpack") statt als fertigen Satz: So kann das Terminal sie in
+ * der Sprache der Installation ausgeben.
  */
 export async function installSteamCmd(job) {
   const tar = findBinary(["/bin/tar", "/usr/bin/tar"]);
@@ -131,7 +135,8 @@ export async function installSteamCmd(job) {
   let lastError = null;
   for (const url of STEAMCMD_URLS) {
     try {
-      job?.append(`Lade SteamCMD von ${url}`);
+      if (job?.step) job.step("download", { url });
+      else job?.append(`Lade SteamCMD von ${url}`);
       await download(url, archive);
       lastError = null;
       break;
@@ -142,7 +147,8 @@ export async function installSteamCmd(job) {
   }
   if (lastError) throw new Error(`SteamCMD konnte nicht geladen werden: ${lastError.message}`);
 
-  job?.append("Entpacke SteamCMD");
+  if (job?.step) job.step("unpack", {});
+  else job?.append("Entpacke SteamCMD");
   await runQuiet(tar, ["-xzf", archive, "-C", STEAMCMD_DIR]);
   rmSync(archive, { force: true });
 
@@ -274,9 +280,13 @@ export async function steamLogin({ steamcmdPath, account, password, job }) {
 /**
  * Prueft, ob das gemerkte Sitzungstoken noch traegt: Anmeldung ohne Passwort.
  * Sobald SteamCMD nach einem Passwort fragt, ist die Antwort nein.
+ *
+ * `code` sagt, warum nicht, fuer Ausgaben in anderer Sprache: "account",
+ * "session" (Token traegt nicht), "steam" (message ist der Text von Steam)
+ * oder "unconfirmed".
  */
 export async function verifySession({ steamcmdPath, account }) {
-  if (!ACCOUNT_PATTERN.test(account || "")) return { ok: false, message: "Ungueltiger Kontoname." };
+  if (!ACCOUNT_PATTERN.test(account || "")) return { ok: false, code: "account", message: "Ungueltiger Kontoname." };
 
   const pty = spawnPty({
     command: steamcmdPath,
@@ -296,9 +306,10 @@ export async function verifySession({ steamcmdPath, account }) {
     );
     if (step.name === "ok") return { ok: true };
     if (step.name === "password" || step.name === "guard" || step.name === "cached") {
-      return { ok: false, message: "Das Sitzungstoken traegt nicht mehr. Bitte neu anmelden." };
+      return { ok: false, code: "session", message: "Das Sitzungstoken traegt nicht mehr. Bitte neu anmelden." };
     }
-    return { ok: false, message: failureReason(pty.output) };
+    const code = pty.output.match(PATTERNS.loginFailed) ? "steam" : "unconfirmed";
+    return { ok: false, code, message: failureReason(pty.output) };
   } finally {
     pty.kill();
   }

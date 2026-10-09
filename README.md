@@ -86,6 +86,14 @@ nothing changes on the server, and the installer finishes without linking.
 `sudo dzpage-panel link` links it later. That is all. The pairing code works
 once and expires after 30 minutes.
 
+The terminal speaks the ten languages of dzpage.com (en, de, fr, es, it, ru,
+pl, cs, pt, zh). The command from dzpage.com carries the language of the page
+(`--lang de`), and the installer remembers it for every later
+`dzpage-panel` command. Without `--lang` it follows the machine's locale
+(`LANG`); on most rented servers that is `C.UTF-8`, so English. To switch
+later: `sudo dzpage-panel language de`. For a single call there is
+`sudo dzpage-panel --lang en status`.
+
 Logged in as root on a machine without `sudo` (Debian installed with a root
 password has none)? Then leave out `sudo`, everything else stays the same:
 `curl -fsSL https://dzpage.com/panel/install.sh | bash -s -- --pair dzp_pair_…`.
@@ -155,6 +163,7 @@ Options:
 | `--no-steam-deps` | do not add the i386 architecture or 32-bit libraries |
 | `--no-node` | do not install a private Node runtime |
 | `--with-docker` | allow the Docker runtime for game servers (see below) |
+| `--lang <code>` | language of the terminal: `en`, `de`, `fr`, `es`, `it`, `ru`, `pl`, `cs`, `pt`, `zh` (remembered) |
 
 ### The `dzpage-panel` command
 
@@ -172,6 +181,10 @@ interface cannot do itself:
 | `sudo dzpage-panel https disable` | back to `127.0.0.1` only |
 | `sudo dzpage-panel logs` | follow the panel log |
 | `sudo dzpage-panel uninstall [--purge]` | remove the panel (see [Uninstall](#uninstall)) |
+| `sudo dzpage-panel language [<code>]` | show the terminal language, or change it for good (`de`, `fr`, …) |
+
+Put `--lang <code>` in front of any of them for one call in another language,
+handy when someone helps you in theirs: `sudo dzpage-panel --lang en status`.
 
 ### Option B: Docker
 
@@ -599,7 +612,8 @@ not an error.
 sudo dzpage-panel uninstall
 ```
 
-That stops the panel and every game server, removes the services, the server
+To confirm, it asks you to type `uninstall`, the same word in every language.
+Then it stops the panel and every game server, removes the services, the server
 users, the panel’s firewall rules, its Caddy site and the program. Game files,
 saves, database and configuration stay in `/var/lib/dzpage-panel` and
 `/etc/dzpage-panel`, so a new install picks up where you left off. To remove
@@ -680,6 +694,14 @@ no artefact: the tag *is* the release.
 The panel speaks English (default) and German. Another language is one file in
 `src/i18n/` plus one entry in `src/i18n/index.js`; a test makes sure no language
 forgets a key.
+
+The terminal (installer, `dzpage-panel`, uninstall, HTTPS setup) speaks ten
+languages. Its texts live in `src/i18n/terminal/<code>.txt`, one `key=text` line
+each, read alike by bash (`helper/i18n.sh`) and by Node (`src/i18n/terminal.js`).
+`bootstrap.sh` carries its dozen texts itself, because it arrives alone through
+curl. `test/terminal-i18n.test.js` checks that every language has the same keys
+and placeholders, that commands and paths stay untranslated, and that bash and
+Node read the files the same way.
 
 The code comments are in German, because this started as a German project. Pull
 requests are welcome in either language.

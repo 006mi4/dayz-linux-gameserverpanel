@@ -59,10 +59,13 @@ function collect(child, { onOutput } = {}) {
   });
 }
 
-/** Ohne Terminal: eigene Sitzung, damit auch ein Testlauf am Terminal keins vererbt. */
+/**
+ * Ohne Terminal: eigene Sitzung, damit auch ein Testlauf am Terminal keins vererbt.
+ * Ausgaben auf Deutsch, wie die Erwartungen unten (Englisch ist die Vorgabe).
+ */
 function runAdmin(args, { baseUrl = stub.url } = {}) {
   const child = spawn(process.execPath, [ADMIN, ...args], {
-    env: { ...process.env, DZPAGE_BASE_URL: baseUrl },
+    env: { ...process.env, DZPAGE_BASE_URL: baseUrl, DZPAGE_PANEL_LANG: "de" },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });
@@ -86,6 +89,7 @@ function runAdminAtTerminal(args, keys, { early = null, env: extraEnv = {}, sudo
   if (sudoPipe) {
     const vars = {
       DZPAGE_BASE_URL: stub.url,
+      DZPAGE_PANEL_LANG: "de",
       DZPAGE_PANEL_CONFIG_DIR: process.env.DZPAGE_PANEL_CONFIG_DIR,
       DZPAGE_PANEL_DATA_DIR: process.env.DZPAGE_PANEL_DATA_DIR,
       DZPAGE_PANEL_LOG_LEVEL: "error",
@@ -95,7 +99,7 @@ function runAdminAtTerminal(args, keys, { early = null, env: extraEnv = {}, sudo
     command = `echo x | sudo -n env ${assignments.join(" ")} ${command}`;
   }
   const child = spawn("script", ["-qec", command, "/dev/null"], {
-    env: { ...process.env, DZPAGE_BASE_URL: stub.url, ...extraEnv },
+    env: { ...process.env, DZPAGE_BASE_URL: stub.url, DZPAGE_PANEL_LANG: "de", ...extraEnv },
     stdio: ["pipe", "pipe", "pipe"],
   });
   if (early) child.stdin.write(early);

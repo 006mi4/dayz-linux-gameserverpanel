@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { prepareEnv, startDzpageStub } from "../test-support/helper.js";
+import { TERMINAL_LOCALES, terminalTranslator } from "../src/i18n/terminal.js";
 
 /**
  * Kopplung mit dem DZPage-Konto ueber die Kommandozeile, so wie install.sh sie
@@ -24,10 +25,11 @@ test.after(async () => {
   await stub.stop();
 });
 
-function runAdmin(args, { onOutput } = {}) {
+/** Ausgaben auf Deutsch, wie die Erwartungen unten; `env` ueberschreibt das. */
+function runAdmin(args, { onOutput, env: extra = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [ADMIN, ...args], {
-      env: { ...process.env, DZPAGE_BASE_URL: stub.url },
+      env: { ...process.env, DZPAGE_BASE_URL: stub.url, DZPAGE_PANEL_LANG: "de", ...extra },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
@@ -50,6 +52,24 @@ test("Ein falsch geformter Kopplungscode verlässt die Maschine gar nicht", asyn
   assert.equal(result.code, 1);
   assert.match(result.output, /ungültig/);
   assert.equal(stub.calls.pair.length, 0);
+});
+
+test("Ohne Sprachangabe und mit LANG=C.UTF-8 antwortet das Terminal auf Englisch", async () => {
+  const result = await runAdmin(["link", "--token", "dzp_panel_irgendwas"], {
+    env: { DZPAGE_PANEL_LANG: "", LC_ALL: "", LC_MESSAGES: "", LANG: "C.UTF-8" },
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.output, "This pairing code is invalid. Get a new command on dzpage.com.\n");
+});
+
+test("Jede der zehn Sprachen kommt im Terminal an, ohne Rückfall auf Englisch", async () => {
+  const english = terminalTranslator("en")("admin.pair.invalid_token");
+  for (const locale of TERMINAL_LOCALES) {
+    const expected = terminalTranslator(locale)("admin.pair.invalid_token");
+    const result = await runAdmin(["link", "--token", "dzp_panel_irgendwas"], { env: { DZPAGE_PANEL_LANG: locale } });
+    assert.equal(result.output, `${expected}\n`, locale);
+    if (locale !== "en") assert.notEqual(expected, english, locale);
+  }
 });
 
 test("Ein abgelaufener Kopplungscode wird verständlich abgelehnt", async () => {
