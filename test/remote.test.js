@@ -192,6 +192,11 @@ test("Installieren von dzpage.com: Fortschritt, dann bereit mit Build", async ()
   assert.ok(percents.length >= 2, `Zwischenstaende erwartet: ${JSON.stringify(progress)}`);
   assert.ok(percents.every((p) => p >= 0 && p <= 100));
   assert.ok(progress.some((p) => /downloading, progress/.test(p.progress ?? "")));
+  // Kontoname und Pfade bleiben auf der Maschine.
+  assert.ok(
+    progress.every((p) => !/cachedslow_konto|\/var\/|servers\//.test(p.progress ?? "")),
+    JSON.stringify(progress.map((p) => p.progress)),
+  );
 
   // Waehrend der Installation steht "installing" in einem Bericht, danach "ready".
   await reportWhere((r) => serverIn(r, remoteId)?.installState === "installing", { from });
@@ -243,6 +248,35 @@ test("Protokoll von dzpage.com: letzte Zeilen, Zeilenzahl geprüft", async () =>
     assert.equal(result.status, "failed");
     assert.equal(result.code, "payload");
   }
+});
+
+test("Eine wartende Installation bricht ab, wenn der Server inzwischen gelöscht ist", async () => {
+  stub.queueJob({
+    id: "create-gone",
+    kind: "create",
+    serverId: null,
+    payload: { ...SERVER, name: "Gleich weg", gamePort: 2902, queryPort: 27616, rconPort: 2906 },
+  });
+  const created = await resultOf("create-gone");
+  assert.equal(created.status, "done", created.detail);
+  const goneId = created.result.serverId;
+
+  // Ein anderer Vorgang belegt den einen Platz; die Installation wartet.
+  let release;
+  const hold = panel.app.jobs.start("test-hold", () => new Promise((resolve) => (release = resolve)));
+  assert.equal(hold.ok, true);
+  stub.queueJob({ id: "install-gone", kind: "update", serverId: goneId });
+  await waitFor(() => stub.calls.progress.find((p) => p.jobId === "install-gone" && /Wartet/.test(p.progress ?? "")));
+
+  // Waehrenddessen verschwindet der Server (wie beim Loeschen im Panel).
+  await panel.app.db.run("DELETE FROM servers WHERE id = ?", [goneId]);
+  const callsBefore = helperCalls().length;
+  release();
+
+  const result = await resultOf("install-gone");
+  assert.equal(result.status, "failed");
+  assert.equal(result.code, "unknown_server");
+  assert.doesNotMatch(helperCalls().slice(callsBefore).join("\n"), new RegExp(`prepare ${goneId}`));
 });
 
 test("Ein im Panel angelegter Server lässt sich von dzpage.com aus anmelden", async () => {
@@ -336,7 +370,17 @@ test("Fortschritt aus der SteamCMD-Ausgabe und Protokoll-Kürzung", () => {
     percent: 62.25,
     text: "Update state (0x61) downloading, progress: 62.25 (1 / 2)",
   });
-  assert.deepEqual(steamProgress(["Installiere DayZ"]), { percent: null, text: "Installiere DayZ" });
+  // Andere Zeilen gehen nie hinaus, auch nicht ersatzweise: Darin stehen der
+  // Steam-Kontoname und Pfade der Maschine.
+  assert.deepEqual(steamProgress(["Installiere DayZ (App 223350) nach /var/lib/dzpage-panel/servers/x/game."]), {
+    percent: null,
+    text: null,
+  });
+  assert.deepEqual(steamProgress(["Logging in user 'mein_konto' [U:1:0] to Steam Public...OK"]), {
+    percent: null,
+    text: null,
+  });
+  assert.deepEqual(steamProgress(["progress: 50 bei mein_konto"]), { percent: null, text: null });
   assert.deepEqual(steamProgress([]), { percent: null, text: null });
 
   const long = Array.from({ length: 5000 }, (_, i) => `Zeile ${i} ${"x".repeat(40)}`).join("\n");
@@ -344,6 +388,10 @@ test("Fortschritt aus der SteamCMD-Ausgabe und Protokoll-Kürzung", () => {
   assert.ok(Buffer.byteLength(tail) <= 4096);
   assert.match(tail, /Zeile 4999 /);
   assert.equal(tailText("kurz"), "kurz");
+  // Eine einzelne Zeile ueber der Grenze: ihr Ende statt eines leeren Protokolls.
+  const oneLine = tailText(`Anfang${"y".repeat(10_000)}Ende`, 4096);
+  assert.equal(Buffer.byteLength(oneLine), 4096);
+  assert.match(oneLine, /Ende$/);
 
   assert.throws(() => createInputFrom(null), /keine Serverangaben/);
   assert.throws(() => createInputFrom([1, 2]), /keine Serverangaben/);

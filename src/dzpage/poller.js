@@ -102,6 +102,9 @@ export function tailText(text, maxBytes = LOG_BYTES_MAX) {
     kept.unshift(lines[index]);
     size += bytes;
   }
+  // Schon die letzte Zeile allein ist zu lang: dann wenigstens ihr Ende,
+  // statt ein leeres Protokoll zu melden.
+  if (kept.length === 0) return Buffer.from(lines.at(-1) ?? "", "utf8").subarray(-maxBytes).toString("utf8");
   return kept.join("\n");
 }
 
@@ -292,12 +295,19 @@ export function createPoller(app) {
    * genau wie bei der Schaltflaeche im Panel.
    */
   async function runUpdate(server, progress) {
+    let gone = false;
     const appJob = await startWhenFree(
       "server-install",
       async (job) => {
         job.serverId = server.id;
-        // Frisch lesen: Waehrend des Wartens kann sich der Eintrag geaendert haben.
-        const fresh = (await getServer(app.db, server.id)) ?? server;
+        // Frisch lesen: Waehrend des Wartens kann der Server geaendert oder
+        // geloescht worden sein. Fuer einen geloeschten wuerde die Installation
+        // Verzeichnis und Unit eines Servers anlegen, den es nicht mehr gibt.
+        const fresh = await getServer(app.db, server.id);
+        if (!fresh) {
+          gone = true;
+          throw new Error("Der Server wurde inzwischen gelöscht.");
+        }
         await updateGameFiles(app, fresh, job);
         return { serverId: server.id };
       },
@@ -312,6 +322,7 @@ export function createPoller(app) {
     } finally {
       clearInterval(ticker);
     }
+    if (gone) throw new JobError("unknown_server", finished.error);
     if (finished.status !== "ok") throw new JobError("install", finished.error || "Aktualisierung fehlgeschlagen.");
   }
 

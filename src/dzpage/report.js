@@ -154,7 +154,11 @@ export function createReporter(app) {
       // Schluessel und unbekannte Panel-ID behandelt der Herzschlag, Netzfehler
       // der naechste Anlass. Nur ein dzpage.com ohne diesen Endpunkt bekommt
       // eine Weile Ruhe, statt nach jedem Auftrag gefragt zu werden.
-      if (result.code === "not_found") pausedUntil = Date.now() + PAUSE_WHEN_UNSUPPORTED_MS;
+      // Ebenso ein Bericht, den DZPage als Ganzes ablehnt: Er wuerde bei jedem
+      // Anlass genauso wieder abgelehnt.
+      if (result.code === "not_found" || result.code === "bad_report") {
+        pausedUntil = Date.now() + PAUSE_WHEN_UNSUPPORTED_MS;
+      }
       log.debug(`Zustandsbericht nicht angenommen (${result.code})`);
     }
     return { ...result, report };

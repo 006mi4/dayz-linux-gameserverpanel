@@ -490,9 +490,13 @@ export async function act(rc) {
         return;
       case "delete-confirm": {
         // Waehrend SteamCMD in das Verzeichnis schreibt, waere ein Loeschen ein
-        // Wettlauf: die Installation legte danach Teile wieder an.
-        if (rc.app.jobs.current()?.running) throw new Error(t("servers.err.busy"));
-        await removeServer(rc.app, server);
+        // Wettlauf: die Installation legte danach Teile wieder an. Deshalb als
+        // Vorgang, wie der Auftrag von dzpage.com: Solange er laeuft, beginnt
+        // auch von dort keine Installation.
+        const started = rc.app.jobs.start("server-delete", () => removeServer(rc.app, server));
+        if (!started.ok) throw new Error(t("servers.err.busy"));
+        const finished = await started.job.completion;
+        if (finished.status !== "ok") throw new Error(finished.error || t("servers.err.busy"));
         rc.app.reporter?.nudge();
         rc.redirect("/servers");
         return;

@@ -96,20 +96,25 @@ export async function installGameFiles({ config, server, account, job }) {
 }
 
 /**
+ * Eine Statuszeile von SteamCMD, und nur eine solche:
+ * "Update state (0x61) downloading, progress: 12.34 (532123456 / 4312312312)".
+ */
+const STEAM_STATE_LINE = /^Update state \(0x[0-9a-f]+\) [a-z ,]+, progress: (\d{1,3}(?:\.\d+)?) \(\d+ \/ \d+\)$/i;
+
+/**
  * Fortschritt aus der Ausgabe von SteamCMD, fuer die Anzeige auf dzpage.com:
- * die letzte Zeile mit "progress: 12.34" samt Prozentwert. Ohne eine solche
- * Zeile nur die letzte Zeile, damit man sieht, wo es steht.
+ * die letzte Statuszeile samt Prozentwert. Andere Zeilen gehen nicht hinaus,
+ * auch nicht ersatzweise: Darin stehen der Steam-Kontoname ("Logging in user
+ * ...") und Pfade dieser Maschine, und beides geht DZPage nichts an.
  */
 export function steamProgress(lines) {
   const tail = lines.slice(-40);
   for (let index = tail.length - 1; index >= 0; index -= 1) {
-    const match = tail[index].match(/progress:\s*(\d{1,3}(?:\.\d+)?)/i);
-    if (match) {
-      return { percent: Math.min(100, Math.max(0, Number(match[1]))), text: tail[index].trim().slice(0, 200) };
-    }
+    const line = tail[index].trim();
+    const match = line.match(STEAM_STATE_LINE);
+    if (match) return { percent: Math.min(100, Math.max(0, Number(match[1]))), text: line.slice(0, 200) };
   }
-  const last = tail.at(-1);
-  return { percent: null, text: last ? last.trim().slice(0, 200) : null };
+  return { percent: null, text: null };
 }
 
 /**
