@@ -35,6 +35,21 @@ die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Bitte als root ausfuehren (sudo)."
 
+# Schreibt stdin als Datei, die root gehoert, nach $CONFIG_DIR. Das Verzeichnis
+# gehoert dem Dienst, und "printf >" und chmod folgten einem Verweis, den ein
+# uebernommenes Panel dort hinlegt. Die Nebendatei entsteht deshalb in /etc, wo
+# der Dienst nichts anfassen kann, und "mv -T" ersetzt auf demselben
+# Dateisystem nur den Eintrag (wie install.json in install.sh).
+replace_root_file() {
+  local dest=$1 tmp
+  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX")
+  if cat > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # Nur der Schluessel der obersten Ebene: panel.json schreibt das Panel mit zwei
 # Leerzeichen Einzug, und bei MySQL steht unter "database" ein zweiter "port"
 # (3306). Ohne diese Einschraenkung kamen beide Zahlen heraus.
@@ -235,8 +250,7 @@ EOF
   # Ab hier ist etwas eingerichtet: Den Merker zuerst schreiben, damit
   # "https disable" und die Deinstallation aufraeumen, auch wenn ein spaeterer
   # Schritt scheitert.
-  printf '%s\n' "$domain" > "$DOMAIN_FILE"
-  chmod 0644 "$DOMAIN_FILE"
+  printf '%s\n' "$domain" | replace_root_file "$DOMAIN_FILE" || die "$DOMAIN_FILE liess sich nicht schreiben."
   firewall_web open
   panel_proxy_mode 1
   systemctl enable --quiet caddy

@@ -47,6 +47,19 @@ need_number() {
 unit_for() { echo "$UNIT_PREFIX@$1.service"; }
 user_for() { echo "dzsrv_$1"; }
 
+# Was in servers/ geschieht, laeuft als Panel-Benutzer und nicht als root:
+# Ihm gehoeren servers/ und die Serververzeichnisse, er kann dort also jeden
+# Eintrag gegen einen Verweis tauschen, auch waehrend dieser Aufruf laeuft.
+# Als root folgten mkdir -p, chmod und find einem solchen Verweis bis nach
+# /etc; als Panel-Benutzer fuehrt er nirgends hin, wo dieser nicht ohnehin
+# hinkommt. Die Gruppe des Servers kommt dazu, sonst laesst chmod das
+# setgid-Bit stillschweigend weg.
+as_panel() {
+  local group=$1
+  shift
+  setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --groups="$group" -- "$@"
+}
+
 # Rechte so setzen, dass beide Seiten arbeiten koennen: das Panel installiert
 # die Spieldateien als dzpage, der Server schreibt spaeter als eigener Benutzer
 # in dieselben Verzeichnisse. Deshalb Gruppe = Serverbenutzer, Gruppenschreibrecht
@@ -54,10 +67,12 @@ user_for() { echo "dzsrv_$1"; }
 fix_permissions() {
   local id=$1 dir=$2 user
   user=$(user_for "$id")
+  # Nur chown braucht root. chown -R folgt keinem Verweis, auch nicht dem als
+  # Argument (dann bekommt nur der Verweis selbst den neuen Besitzer).
   chown -R "$PANEL_USER:$user" "$dir"
-  chmod 2770 "$dir"
-  find "$dir" -type d -exec chmod g+rwxs {} +
-  find "$dir" -type f -exec chmod g+rw {} +
+  as_panel "$user" chmod 2770 "$dir"
+  as_panel "$user" find "$dir" -type d -exec chmod g+rwxs {} +
+  as_panel "$user" find "$dir" -type f -exec chmod g+rw {} +
 }
 
 cmd_prepare() {
@@ -73,7 +88,7 @@ cmd_prepare() {
   [ -f "$DROPIN_ROOT/$UNIT_PREFIX@.service" ] || die "Vorlage $UNIT_PREFIX@.service fehlt"
 
   id -u "$user" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
-  mkdir -p "$dir/game" "$dir/profiles/battleye"
+  as_panel "$user" mkdir -p "$dir/game" "$dir/profiles/battleye"
 
   # Die Rechte nur richten, wenn sie nicht schon stimmen: Ein chown -R ueber
   # sechs Gigabyte Spieldateien kostet Zeit, und prepare laeuft inzwischen vor
@@ -85,7 +100,9 @@ cmd_prepare() {
 
   # Durchgangsrecht, aber kein Leserecht: der Serverbenutzer kommt in sein
   # eigenes Verzeichnis, sieht aber weder die Nachbarn noch die Panel-Datenbank.
-  chmod 0751 "$DATA_DIR" "$SERVERS_DIR"
+  # $DATA_DIR liegt in /var/lib und kann nicht vertauscht werden, servers schon.
+  chmod 0751 "$DATA_DIR"
+  as_panel "$user" chmod 0751 "$SERVERS_DIR"
 
   dropin=$DROPIN_ROOT/$unit.d
   mkdir -p "$dropin"

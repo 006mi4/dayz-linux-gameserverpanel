@@ -54,6 +54,23 @@ note() { printf '  %s\n' "$*"; }
 warn() { printf '  \033[33mAchtung:\033[0m %s\n' "$*"; }
 die() { printf '\n\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Ein Befehl als Dienstbenutzer. Fuer Lesezugriffe in seinen Verzeichnissen:
+# Dort kann er Eintraege gegen Verweise tauschen, und als er selbst erreicht
+# ein Verweis nichts, was er nicht ohnehin lesen darf.
+as_service() { setpriv --reuid="$SERVICE_USER" --regid="$SERVICE_USER" --clear-groups -- "$@"; }
+
+# Schreibt stdin als Datei, die root gehoert, in ein Verzeichnis des Dienstes.
+# Warum ueber /etc und "mv -T", steht bei install.json.
+replace_root_file() {
+  local dest=$1 tmp
+  tmp=$(mktemp "$(dirname "$CONFIG_DIR")/.dzpage-panel-$(basename "$dest").XXXXXX")
+  if cat > "$tmp" && chmod 0644 "$tmp" && mv -fT "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  die "$dest liess sich nicht schreiben."
+}
+
 [ "$(id -u)" -eq 0 ] || die "Bitte mit sudo ausfuehren."
 [ -d /run/systemd/system ] || die "Dieses System benutzt kein systemd."
 [ -f "$SOURCE_DIR/bin/dzpage-panel.js" ] || die "install.sh muss im entpackten Panel-Verzeichnis liegen."
@@ -285,7 +302,32 @@ done
 # dieser Stelle nimmt jedem vorhandenen Spielserver den Weg in sein Verzeichnis,
 # und er scheitert beim naechsten Start mit "200/CHDIR" — einmal live erlebt.
 install -d -m 0751 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
-install -d -m 0751 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/servers"
+#
+# Anders als $CONFIG_DIR und $DATA_DIR liegt servers in einem Verzeichnis des
+# Dienstes, und "install -d -o" folgt einem Verweis: Ein uebernommenes Panel
+# koennte servers gegen einen Verweis auf /etc/systemd/system tauschen und
+# bekaeme das Ziel bei der naechsten Selbstaktualisierung geschenkt. Deshalb
+# derselbe Weg wie oben bei panel.json: anlegen, mit O_NOFOLLOW oeffnen,
+# Besitzer und Rechte ueber den Deskriptor.
+"$NODE_BIN" -e '
+  const fs = require("node:fs");
+  const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = fs.constants;
+  const [dir, uid, gid] = process.argv.slice(1);
+  try {
+    fs.mkdirSync(dir, 0o751);
+  } catch (err) {
+    if (err.code !== "EEXIST") process.exit(1);
+  }
+  let fd;
+  try {
+    fd = fs.openSync(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  } catch {
+    process.exit(1);
+  }
+  fs.fchownSync(fd, Number(uid), Number(gid));
+  fs.fchmodSync(fd, 0o751);
+' "$DATA_DIR/servers" "$(id -u "$SERVICE_USER")" "$(id -g "$SERVICE_USER")" \
+  || warn "$DATA_DIR/servers bleibt, wie es ist (Verweis oder kein Verzeichnis). Der Dienst braucht dort ein Verzeichnis, das ihm gehoert, mit 0751."
 note "$CONFIG_DIR und $DATA_DIR bereit"
 
 # ---------------------------------------------------------------- Dateien
@@ -351,7 +393,15 @@ ARGS_JSON=""
 for arg in ${PERSIST_ARGS[@]+"${PERSIST_ARGS[@]}"}; do
   ARGS_JSON="${ARGS_JSON:+$ARGS_JSON, }\"$arg\""
 done
-cat > "$CONFIG_DIR/install.json" <<EOF
+# Gehoert root: Das Panel liest die Datei, aendern darf es sie nicht.
+#
+# Nicht "cat >" und chmod auf den Namen: $CONFIG_DIR gehoert dem Dienst, und
+# beide folgten einem Verweis, den ein uebernommenes Panel dort hinlegt (die
+# Zieldatei waere danach JSON). Die Nebendatei entsteht deshalb in /etc, wo der
+# Dienst nichts anfassen kann, und "mv -T" ist auf demselben Dateisystem ein
+# rename: Es ersetzt den Eintrag selbst, folgt keinem Verweis, und -T laesst
+# einen Verweis auf ein Verzeichnis die Datei nicht dort hineinschieben.
+replace_root_file "$CONFIG_DIR/install.json" <<EOF
 {
   "method": "$INSTALL_METHOD",
   "checkout": "$CHECKOUT",
@@ -360,9 +410,6 @@ cat > "$CONFIG_DIR/install.json" <<EOF
   "installedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
-# Gehoert root: Das Panel liest die Datei, aendern darf es sie nicht.
-chown root:root "$CONFIG_DIR/install.json"
-chmod 0644 "$CONFIG_DIR/install.json"
 
 # Der Befehl "dzpage-panel" fuer die Kommandozeile. Er braucht dieselbe
 # Node-Laufzeit wie der Dienst, fuer "reset-password".
@@ -428,8 +475,12 @@ fi
 # Verwaltet wird ueber dzpage.com. Die lokale Oberflaeche ist der Notzugang,
 # deshalb steht sie hier kurz und vor der Kopplung, die den Abschluss bildet.
 say "Lokale Oberflaeche (optional)"
-if [ -f "$CONFIG_DIR/https-domain" ]; then
-  note "https://$(cat "$CONFIG_DIR/https-domain")"
+# Als Dienstbenutzer gelesen: Bei der Selbstaktualisierung geht diese Ausgabe
+# in self-update.log, und root braechte ueber einen Verweis anstelle der Datei
+# den Anfang jeder Datei dorthin, die nur root lesen darf.
+HTTPS_DOMAIN=$(as_service head -c 256 "$CONFIG_DIR/https-domain" 2>/dev/null | head -n 1 || true)
+if [ -n "$HTTPS_DOMAIN" ]; then
+  note "https://$HTTPS_DOMAIN"
 else
   HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
   note "http://127.0.0.1:$PORT, vom eigenen Rechner aus ueber einen SSH-Tunnel:"
